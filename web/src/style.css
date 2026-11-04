@@ -712,6 +712,55 @@ button.mini { font-size: 11px; padding: 2px 8px; }
   border-bottom: 1px dashed var(--border);
 }
 
+/* ---------------------------------------------------------------- 模型对比 */
+.compare-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 0;
+}
+.compare-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.compare-col + .compare-col { border-left: 1px solid var(--border); }
+.compare-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 12px; color: var(--dim);
+  flex: none;
+}
+.compare-head select {
+  margin-left: auto;
+  padding: 4px 8px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  font: inherit; font-size: 11px;
+}
+.compare-body {
+  flex: 1; overflow-y: auto; padding: 14px;
+  min-height: 0;
+}
+.compare-stats {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--dim);
+  flex: none; min-height: 28px;
+  font-variant-numeric: tabular-nums;
+}
+.compare-stats b { color: var(--text); }
+
+@media (max-width: 900px) {
+  .compare-grid { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  .compare-col + .compare-col { border-left: 0; border-top: 1px solid var(--border); }
+}
+
 @media (max-width: 1080px) {
   .main { grid-template-columns: 240px minmax(0, 1fr); }
   .col.right { display: none; }
