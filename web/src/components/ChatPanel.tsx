@@ -217,14 +217,14 @@ export default function ChatPanel({
         <div className="hint">
           <label
             style={{ display: "flex", alignItems: "center", gap: 5 }}
-            title={isLocal ? "" : "远程 agent 只有只读工具：能查资料/读文件，不能写文件或执行命令"}
+            title={isLocal ? "" : "远程 agent 受限：能查资料、读文件、生成可下载的文件；不能执行命令或改已有文件"}
           >
             <input
               type="checkbox"
               checked={useAgent}
               onChange={(e) => onUseAgentChange(e.target.checked)}
             />
-            agent 模式{isLocal ? "" : "（远程只读）"}
+            agent 模式{isLocal ? "" : "（远程受限）"}
           </label>
           <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
             <option value="auto">自动选型</option>

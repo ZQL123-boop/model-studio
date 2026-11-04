@@ -404,27 +404,32 @@ def _chat_tools() -> list[dict]:
 
 
 # ------------------------------------------------------------------ 远程访客的工具白名单
-# 公网/局域网别的设备用 agent 时，只给这些**只读 + 联网**工具。
+# 公网/局域网别的设备用 agent 时只给这些工具。
 #
-# 为什么必须排除写类：write_file / edit_file / run_bash / office / make_chart
-# 都会在主人的 Mac 上落文件。公网用户说「在桌面建个文件，内容写 hello」，
-# 文件就会出现在 Mac 的桌面——写到别人的机器上了，这是错的。
+# 两类都放开：
+#   - 只读：web_search / read_file / grep_code …
+#   - 生成文件：write_file / make_chart / generate_image / office
+#     产物落在 sandbox/generated/ 下（write_file、office 的 path 会被强制
+#     重定向到 generated/remote/），前端渲染成下载链接，
+#     文件最终落到访客自己的设备——浏览器不能直写磁盘，只能这么走。
 #
-# 注意：read_file / grep_code 等仍能读 Mac 上的文件（隐私边界在 tools.py
-# 的黑名单里：.env、私钥不给读）。要连读都禁，把下面集合缩到只剩联网类。
-REMOTE_READONLY_TOOLS = {
+# 仍然禁用的理由：
+#   run_bash     浏览器没有 shell，也没法在访客设备上执行
+#   edit_file    要改已有文件，访客设备上的文件浏览器读不到
+#   design       需要本地 HTML 文件做预览/截图
+#   spawn_agents 子代理会继承全量工具集，等于绕过这里的限制
+#   set_goal     会改主人 Mac 上的目标列表
+REMOTE_TOOLS = {
     # 联网 / 实时数据
     "web_search", "fetch_url", "get_weather", "get_exchange_rate",
     # 本地知识库（OI Wiki，只读语料）
     "knowledge_search",
     # 读文件（只读，不落盘）
     "read_file", "list_dir", "find_files", "grep_code", "analyze_data",
-    # 状态类
-    "list_goals", "check_task",
-    # 写文件：路径会被强制重定向到 REMOTE_OUT_DIR（见 agent_stream），
-    # 碰不到主人的桌面和项目目录；前端把它渲染成下载链接，
-    # 文件最终落到访客自己的设备——浏览器不能直写磁盘，只能这么走。
-    "write_file",
+    # 状态 / 规划
+    "list_goals", "check_task", "write_plan",
+    # 生成文件（产物在 generated/ 下，前端给下载链接）
+    "write_file", "make_chart", "generate_image", "office",
 }
 
 # 远程访客写的文件落在这里，对应 URL /generated/remote/<文件名>
@@ -1137,7 +1142,7 @@ async def agent_stream(req: ChatReq, request: Request):
         # 模型看不到 write_file / run_bash，就不会去调，也就不会写错地方。
         if _visitor:
             toolset = [t for t in toolset
-                       if t.get("function", {}).get("name") in REMOTE_READONLY_TOOLS]
+                       if t.get("function", {}).get("name") in REMOTE_TOOLS]
 
         try:
             async with httpx.AsyncClient(timeout=600) as c:
@@ -1484,6 +1489,12 @@ async def agent_stream(req: ChatReq, request: Request):
                         for _tc, _nm, _ar in parsed:
                             if _nm in ("write_file", "edit_file") and _ar.get("path"):
                                 _base = Path(str(_ar["path"])).name or "output.txt"
+                                _ar["path"] = str(REMOTE_OUT_DIR / _base)
+                            elif (_nm == "office"
+                                  and str(_ar.get("action") or "").startswith("make_")
+                                  and _ar.get("path")):
+                                # 只重定向「生成」类，read_* 的 path 保持原样
+                                _base = Path(str(_ar["path"])).name or "output.docx"
                                 _ar["path"] = str(REMOTE_OUT_DIR / _base)
 
                     read_items = [(tc, nm, ar) for tc, nm, ar in parsed
