@@ -336,10 +336,26 @@ export default function App() {
           CPU <b>{status ? `${status.sys.cpu_pct.toFixed(0)}%` : "—"}</b>
         </span>
         <span className="spacer" />
-        <WriteProtectSwitch on={wp} onToggle={toggleWp} />
+        <WriteProtectSwitch
+          on={wp}
+          onToggle={toggleWp}
+          disabled={!isLocalHost()}
+        />
         <ThemeSwitcher accent={accent} onChange={setAccent} />
         <button onClick={loadModels}>刷新模型</button>
-        <button onClick={() => setSettingsOpen(true)}>⚙️ 设置</button>
+        <button
+          onClick={() => {
+            // 公网/局域网设备不让进设置：门禁密码、token 管理都是控制权
+            if (!isLocalHost()) {
+              toast("设置只能在这台 Mac 上打开", true);
+              return;
+            }
+            setSettingsOpen(true);
+          }}
+          title={isLocalHost() ? "设置" : "设置只能在本机（Mac）上打开"}
+        >
+          ⚙️ 设置
+        </button>
       </header>
 
       <div className="main">

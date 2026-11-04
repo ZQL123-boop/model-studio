@@ -773,6 +773,8 @@ button.mini { font-size: 11px; padding: 2px 8px; }
   user-select: none;
 }
 .wp-switch:hover { color: var(--text); }
+.wp-switch.off { opacity: .4; cursor: not-allowed; }
+.wp-switch.off:hover { color: var(--dim); }
 .wp-label { font-size: 12px; }
 
 .theme-switch { position: relative; }

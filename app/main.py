@@ -962,7 +962,8 @@ def get_write_protect():
 
 
 @app.post("/api/tools/write-protect")
-def set_write_protect(req: WriteProtectReq):
+def set_write_protect(req: WriteProtectReq, request: Request):
+    _require_local(request)      # 改 agent 行为是控制权，只能本机
     tools.WRITE_PROTECT = bool(req.on)
     return {"on": tools.WRITE_PROTECT}
 
@@ -1646,6 +1647,7 @@ def gate_verify(req: GateVerifyReq):
 
 @app.post("/api/gate/password")
 def gate_password(req: GatePasswordReq, request: Request):
+    _require_local(request)      # 改门禁密码是控制权，只能本机
     ok, msg = gate.set_password(req.password, req.old_password,
                                 bypass=_is_local_request(request))
     if not ok:
@@ -1654,7 +1656,9 @@ def gate_password(req: GatePasswordReq, request: Request):
 
 
 @app.post("/api/gate/clear")
-def gate_clear():
+def gate_clear(request: Request):
+    """关闭门禁。控制权操作，只能本机——否则远程能把自己的锁拆了。"""
+    _require_local(request)
     gate.clear()
     return {"msg": "门禁已关闭"}
 
