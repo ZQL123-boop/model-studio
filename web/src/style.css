@@ -147,6 +147,28 @@ button.danger:hover:not(:disabled) { border-color: var(--red); }
   font-variant-numeric: tabular-nums;
 }
 
+/* agent 生成的文件：远程访客点下载，落到他自己的设备 */
+.msg-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.download {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
+  text-decoration: none;
+  transition: border-color .15s, background .15s;
+}
+.download:hover { border-color: var(--accent); background: var(--panel); }
+
 .routechip {
   font-size: 11px;
   color: var(--dim);

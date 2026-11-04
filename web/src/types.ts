@@ -52,6 +52,7 @@ export interface ChatMsg {
   failed?: boolean;
   ttft?: number;      // 首 token 延迟（秒）
   elapsed?: number;   // 总耗时（秒）
+  downloads?: { name: string; url: string }[];   // agent 生成的文件，浏览器下载到本机
 }
 
 export interface StreamFrame {
@@ -67,6 +68,7 @@ export interface StreamFrame {
   elapsed_s?: number;
   chunks?: number;
   chunk_per_s?: number;
+  changed?: string[];   // agent done 帧：本次写过的路径
 }
 
 export interface CleanResult {

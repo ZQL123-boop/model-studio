@@ -100,7 +100,18 @@ export default function ChatPanel({
         if (f.t) acc += f.t;
         if (f.answer) acc = f.answer; // agent 末帧是完整答案，覆盖增量
         if (f.done) {
-          paint({ content: acc, route, steps: [...steps], ttft: f.ttft_s, elapsed: f.elapsed_s });
+          // agent 生成的文件在 sandbox/generated 下，转成下载链接：
+          // 远程访客点一下，文件落到他自己的设备（浏览器不能直写磁盘）
+          const downloads = (f.changed || [])
+            .filter((p) => p.includes("/generated/"))
+            .map((p) => {
+              const rel = p.slice(p.indexOf("/generated/") + "/generated/".length);
+              return { name: rel.split("/").pop() || rel, url: `/generated/${rel}` };
+            });
+          paint({
+            content: acc, route, steps: [...steps],
+            ttft: f.ttft_s, elapsed: f.elapsed_s, downloads,
+          });
           scrollBottom();
           continue;
         }
@@ -167,6 +178,15 @@ export default function ChatPanel({
               <div className="msg-meta">
                 {m.ttft != null && <span>首 token {m.ttft.toFixed(2)}s</span>}
                 <span>总耗时 {m.elapsed.toFixed(1)}s</span>
+              </div>
+            )}
+            {m.role === "assistant" && !!m.downloads?.length && (
+              <div className="msg-files">
+                {m.downloads.map((d) => (
+                  <a key={d.url} className="download" href={d.url} download={d.name}>
+                    📥 下载 {d.name}
+                  </a>
+                ))}
               </div>
             )}
           </div>

@@ -83,7 +83,7 @@ async def guard_remote(request, call_next):
     # /assets 是前端编译产物（JS/CSS），和 /static 一样只含静态资源、不含敏感数据。
     # 不放行的话远程访问会白屏：index.html 走白名单能加载，但 /assets/*.js 被 401 拦掉，
     # 页面只剩空的 #root。本机免 token 所以本机看不出这个 bug。
-    if path == "/" or path.startswith(("/static", "/assets")) \
+    if path == "/" or path.startswith(("/static", "/assets", "/generated")) \
             or path == "/api/health" \
             or path.startswith("/api/gate") \
             or path == "/api/public/status":
@@ -421,7 +421,14 @@ REMOTE_READONLY_TOOLS = {
     "read_file", "list_dir", "find_files", "grep_code", "analyze_data",
     # 状态类
     "list_goals", "check_task",
+    # 写文件：路径会被强制重定向到 REMOTE_OUT_DIR（见 agent_stream），
+    # 碰不到主人的桌面和项目目录；前端把它渲染成下载链接，
+    # 文件最终落到访客自己的设备——浏览器不能直写磁盘，只能这么走。
+    "write_file",
 }
+
+# 远程访客写的文件落在这里，对应 URL /generated/remote/<文件名>
+REMOTE_OUT_DIR = tools.WRITE_ROOT / "generated" / "remote"
 
 
 def _route_suggest(question: str) -> dict | None:
@@ -1042,6 +1049,17 @@ async def agent_stream(req: ChatReq, request: Request):
         globals()["_refusal_retry"] = 0
         _visitor = not _is_local_request(request)
         parts = [persona.as_system(with_tools=True, visitor=_visitor)]
+        if _visitor:
+            # 远程访客写文件会被重定向到沙箱 + 转成下载链接，
+            # 不提醒的话模型会顺着用户的话说「已保存到你的桌面」，误导人。
+            parts.append(
+                "【你是远程访客】\n"
+                "你不能直接改用户设备上的文件。用 write_file 写出的文件会被平台"
+                "转成下载链接，用户点一下才能拿到。\n"
+                "所以回答时说「已生成，点下方链接下载」，"
+                "**不要说「已保存到你的桌面/电脑」**——文件不在他设备上，"
+                "要等他点下载。"
+            )
         try:
             if memory.load_settings().get("sysinfo", True):
                 parts.append(sysinfo.as_system())
@@ -1457,6 +1475,16 @@ async def agent_stream(req: ChatReq, request: Request):
                         except json.JSONDecodeError:
                             ar = {}
                         parsed.append((tc, nm, ar))
+
+                    # 远程访客写文件：路径强制落到 REMOTE_OUT_DIR。
+                    # 不这么做的话，公网用户说「在桌面建个文件」，文件就真写到
+                    # 主人的 Mac 桌面了——写到别人机器上了。重定向后前端把这个
+                    # 路径渲染成下载链接，文件最终落到访客自己的设备。
+                    if _visitor:
+                        for _tc, _nm, _ar in parsed:
+                            if _nm in ("write_file", "edit_file") and _ar.get("path"):
+                                _base = Path(str(_ar["path"])).name or "output.txt"
+                                _ar["path"] = str(REMOTE_OUT_DIR / _base)
 
                     read_items = [(tc, nm, ar) for tc, nm, ar in parsed
                                   if nm in agent.READ_ONLY_TOOLS]
