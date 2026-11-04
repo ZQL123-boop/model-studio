@@ -26,8 +26,8 @@ export default function ChatPanel({
   useAgent, onUseAgentChange, settings, onToast,
   msgs, setMsgs,
 }: Props) {
-  // agent 有 20 个工具（含 run_bash、write_file），等于远程 shell，只允许本机跑
-  const agentOk = isLocalHost();
+  // 远程也能用 agent，但后端只给它只读工具（不能写文件 / 执行命令）
+  const isLocal = isLocalHost();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -63,7 +63,7 @@ export default function ChatPanel({
     setBusy(true);
     scrollBottom();
 
-    const path = useAgent && agentOk ? "/api/agent/stream" : "/api/chat/stream";
+    const path = useAgent ? "/api/agent/stream" : "/api/chat/stream";
     // 只带 role/content。中断时累积的 tool 步骤留在当轮闭包里，不能混进下一次请求
     const body = {
       messages: history.map((m) => ({ role: m.role, content: m.content })),
@@ -196,16 +196,15 @@ export default function ChatPanel({
         </div>
         <div className="hint">
           <label
-            style={{ display: "flex", alignItems: "center", gap: 5, opacity: agentOk ? 1 : .45 }}
-            title={agentOk ? "" : "agent 有 run_bash，等于远程 shell，只允许本机使用"}
+            style={{ display: "flex", alignItems: "center", gap: 5 }}
+            title={isLocal ? "" : "远程 agent 只有只读工具：能查资料/读文件，不能写文件或执行命令"}
           >
             <input
               type="checkbox"
-              checked={useAgent && agentOk}
-              disabled={!agentOk}
+              checked={useAgent}
               onChange={(e) => onUseAgentChange(e.target.checked)}
             />
-            agent 模式{agentOk ? "" : "（仅本机）"}
+            agent 模式{isLocal ? "" : "（远程只读）"}
           </label>
           <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
             <option value="auto">自动选型</option>

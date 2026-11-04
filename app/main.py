@@ -403,6 +403,27 @@ def _chat_tools() -> list[dict]:
             if t.get("function", {}).get("name") in CHAT_TOOL_NAMES]
 
 
+# ------------------------------------------------------------------ 远程访客的工具白名单
+# 公网/局域网别的设备用 agent 时，只给这些**只读 + 联网**工具。
+#
+# 为什么必须排除写类：write_file / edit_file / run_bash / office / make_chart
+# 都会在主人的 Mac 上落文件。公网用户说「在桌面建个文件，内容写 hello」，
+# 文件就会出现在 Mac 的桌面——写到别人的机器上了，这是错的。
+#
+# 注意：read_file / grep_code 等仍能读 Mac 上的文件（隐私边界在 tools.py
+# 的黑名单里：.env、私钥不给读）。要连读都禁，把下面集合缩到只剩联网类。
+REMOTE_READONLY_TOOLS = {
+    # 联网 / 实时数据
+    "web_search", "fetch_url", "get_weather", "get_exchange_rate",
+    # 本地知识库（OI Wiki，只读语料）
+    "knowledge_search",
+    # 读文件（只读，不落盘）
+    "read_file", "list_dir", "find_files", "grep_code", "analyze_data",
+    # 状态类
+    "list_goals", "check_task",
+}
+
+
 def _route_suggest(question: str) -> dict | None:
     """用训练好的 0.5B 工具路由器（独立子进程）预测该用哪个工具。
 
@@ -988,10 +1009,8 @@ def agent_sessions(limit: int = 20):
 async def agent_stream(req: ChatReq, request: Request):
     """带文件工具的 agent。状态管理、计划注入、卡住检测都在 app/agent.py。
 
-    **只允许本机**：20 个工具里有 run_bash / write_file / read_file，
-    远程能用等于把 shell 交出去。远程走 /api/chat/stream（只有 5 个只读工具）。
+    远程访客（公网/局域网别的设备）只给只读工具子集，见 REMOTE_READONLY_TOOLS。
     """
-    _require_local(request)
     t = await resolve_target(req.provider, req.messages)
 
     async def sse(obj: dict) -> str:
@@ -1096,6 +1115,11 @@ async def agent_stream(req: ChatReq, request: Request):
         msgs = [{"role": "system", "content": base_system}] + _raw
         t0 = time.time()
         toolset = agent.all_tools(tools.TOOLS)
+        # 远程访客只给只读工具：写类会在主人的 Mac 上落文件。
+        # 模型看不到 write_file / run_bash，就不会去调，也就不会写错地方。
+        if _visitor:
+            toolset = [t for t in toolset
+                       if t.get("function", {}).get("name") in REMOTE_READONLY_TOOLS]
 
         try:
             async with httpx.AsyncClient(timeout=600) as c:
