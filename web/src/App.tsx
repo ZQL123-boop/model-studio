@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getJSON, postJSON, NeedTokenError } from "./api";
 import type {
+  ChatMsg,
   CleanResult,
   GateStatus,
   GenSettings,
@@ -88,6 +89,17 @@ export default function App() {
     () => localStorage.getItem("ms_accent") || "#58a6ff",
   );
   const [wp, setWp] = useState<boolean | null>(null);
+  // 对话消息提到 App 层：切到别的 tab 时 ChatPanel 会卸载，state 放它里面会丢。
+  // 顺手落 sessionStorage，刷新页面也还在（关标签页才清）。
+  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>(() => {
+    try {
+      const raw = sessionStorage.getItem("ms_chat_msgs");
+      if (raw) return JSON.parse(raw) as ChatMsg[];
+    } catch {
+      /* 坏数据当没有 */
+    }
+    return [];
+  });
   // 打开设置前要验锁密码（本会话验过就记住）
   const [settingsAsk, setSettingsAsk] = useState<PwAsk | null>(null);
 
@@ -120,6 +132,15 @@ export default function App() {
       .then((d) => setWp(d.on))
       .catch(() => {});
   }, []);
+
+  // 对话消息落盘：只留最近 100 条，免得撑爆 sessionStorage（5MB 上限）
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("ms_chat_msgs", JSON.stringify(chatMsgs.slice(-100)));
+    } catch {
+      /* 超限或隐私模式，放弃持久化，不影响使用 */
+    }
+  }, [chatMsgs]);
 
   const toast = useCallback((msg: string, err = false) => {
     const id = Date.now() + Math.random();
@@ -399,6 +420,8 @@ export default function App() {
               onUseAgentChange={setUseAgent}
               settings={settings}
               onToast={toast}
+              msgs={chatMsgs}
+              setMsgs={setChatMsgs}
             />
           )}
           {tab === "compare" && (

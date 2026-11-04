@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { streamSSE } from "../api";
 import type { ChatMsg, GenSettings, Provider } from "../types";
 
@@ -15,13 +15,16 @@ interface Props {
   onUseAgentChange: (v: boolean) => void;
   settings: GenSettings;
   onToast: (msg: string, err?: boolean) => void;
+  // 消息提升到 App 持有：切到别的 tab 时本组件会卸载，state 放这儿会丢
+  msgs: ChatMsg[];
+  setMsgs: Dispatch<SetStateAction<ChatMsg[]>>;
 }
 
 export default function ChatPanel({
   ready, providers, provider, onProviderChange,
   useAgent, onUseAgentChange, settings, onToast,
+  msgs, setMsgs,
 }: Props) {
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);

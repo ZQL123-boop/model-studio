@@ -11,13 +11,6 @@ export class NeedTokenError extends Error {
   }
 }
 
-/** gate 的 401 是「密码错误」，不是「缺 token」，必须区分，否则会误导用户。 */
-function check401(path: string, status: number): void {
-  if (status !== 401) return;
-  if (path.startsWith("/api/gate")) throw new Error("密码错误");
-  throw new NeedTokenError();
-}
-
 /** 本机后端放行，远程要 Bearer token；有就带上，没有也照发（后端会 401）。 */
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...(extra || {}) };
@@ -26,15 +19,20 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return h;
 }
 
-export async function getJSON<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: authHeaders() });
-  check401(path, r.status);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return (await r.json()) as T;
-}
-
-export async function postJSON<T>(path: string, body?: unknown): Promise<T> {
-  return request<T>(path, "POST", body);
+/**
+ * 401 有两种来源，必须分开：
+ *   - 中间件：「需要 Authorization: Bearer」→ 缺 token，弹 token 层
+ *   - 接口自己：密码错（gate/verify、lock/verify、tokens 列表）→ 提示密码错
+ *
+ * 光看状态码分不出来（都是 401），所以看响应体里的 detail。
+ * 之前只排除了 /api/gate，导致远程输错锁密码时弹出「需要访问 token」，
+ * 用户完全不知道发生了什么。
+ */
+function handle401(path: string, text: string): never {
+  if (path.startsWith("/api/gate") || text.includes("密码错误")) {
+    throw new Error("密码错误");
+  }
+  throw new NeedTokenError();
 }
 
 async function request<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -43,8 +41,10 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
     headers: authHeaders(body === undefined ? undefined : JSON_HEADERS),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  check401(path, r.status);
   const text = await r.text();
+
+  if (r.status === 401) handle401(path, text);
+
   if (!r.ok) {
     let msg = text;
     try {
@@ -56,6 +56,12 @@ async function request<T>(path: string, method: string, body?: unknown): Promise
     throw new Error(msg || `${r.status} ${r.statusText}`);
   }
   return (text ? JSON.parse(text) : {}) as T;
+}
+
+export const getJSON = <T>(path: string) => request<T>(path, "GET");
+
+export async function postJSON<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, "POST", body);
 }
 
 export const putJSON = <T>(path: string, body?: unknown) =>
@@ -76,7 +82,10 @@ export async function* streamSSE(
     body: JSON.stringify(body),
     signal,
   });
-  check401(path, r.status);
+  if (r.status === 401) {
+    const text = await r.text().catch(() => "");
+    handle401(path, text);
+  }
   if (!r.ok || !r.body) {
     const text = await r.text().catch(() => "");
     throw new Error(text || `${r.status} ${r.statusText}`);
