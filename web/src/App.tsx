@@ -18,9 +18,11 @@ import GateLogin from "./components/GateLogin";
 import RagPanel from "./components/RagPanel";
 import MemoryPanel from "./components/MemoryPanel";
 import DesignPanel from "./components/DesignPanel";
+import ComparePanel from "./components/ComparePanel";
 
 const TABS = [
   ["chat", "对话"],
+  ["compare", "对比"],
   ["rag", "知识库"],
   ["memory", "记忆"],
   ["design", "设计"],
@@ -291,6 +293,9 @@ export default function App() {
               settings={settings}
               onToast={toast}
             />
+          )}
+          {tab === "compare" && (
+            <ComparePanel providers={providers} settings={settings} onToast={toast} />
           )}
           {tab === "rag" && <RagPanel onToast={toast} />}
           {tab === "memory" && <MemoryPanel onToast={toast} />}
