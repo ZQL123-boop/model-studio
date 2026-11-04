@@ -17,7 +17,7 @@ import LogView from "./components/LogView";
 import SettingsDrawer from "./components/SettingsDrawer";
 import GateLogin from "./components/GateLogin";
 import TokenSetup from "./components/TokenSetup";
-import { initToken } from "./auth";
+import { initToken, isLocalHost } from "./auth";
 import RagPanel from "./components/RagPanel";
 import MemoryPanel from "./components/MemoryPanel";
 import DesignPanel from "./components/DesignPanel";
@@ -171,6 +171,12 @@ export default function App() {
   // 门禁：设了访问密码就先过登录层（会话内有效，关标签页重来）
   useEffect(() => {
     (async () => {
+      // 本机免门禁：密码挡的是「别人打开界面」，本机就是主人。
+      // 物理接触已经是最高权限，再弹密码只是给自己添堵。
+      if (isLocalHost()) {
+        setGateOk(true);
+        return;
+      }
       try {
         const g = await getJSON<GateStatus>("/api/gate/status");
         if (!g.has_password) {
@@ -255,6 +261,11 @@ export default function App() {
    * 没设锁密码时不拦——没有可验证的东西，硬拦会让用户无从下手。
    */
   async function openSettings() {
+    // 本机免密：本机就是主人
+    if (isLocalHost()) {
+      setSettingsOpen(true);
+      return;
+    }
     try {
       if (sessionStorage.getItem("ms_settings_ok") === "1") {
         setSettingsOpen(true);

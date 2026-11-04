@@ -62,13 +62,14 @@ def verify(pw: str) -> bool:
     return bool(h) and h == _hash(pw or "")
 
 
-def set_password(pw: str, old_pw: str | None = None) -> tuple[bool, str]:
-    """设置或修改密码。已有密码时必须提供旧密码。"""
+def set_password(pw: str, old_pw: str | None = None,
+                 *, bypass: bool = False) -> tuple[bool, str]:
+    """设置或修改密码。已有密码时必须提供旧密码（本机 bypass 除外）。"""
     pw = (pw or "").strip()
     if len(pw) < 4:
         return False, "密码至少 4 位"
     d = _load()
-    if d["password_hash"] and not verify(old_pw or ""):
+    if d["password_hash"] and not bypass and not verify(old_pw or ""):
         return False, "旧密码错误"
     d["password_hash"] = _hash(pw)
     # 设密码即锁定：用户直觉是"设了密码就锁上了"。
@@ -79,12 +80,12 @@ def set_password(pw: str, old_pw: str | None = None) -> tuple[bool, str]:
     return True, "密码已设置，模型已锁定"
 
 
-def toggle(locked: bool, pw: str) -> tuple[bool, str]:
-    """锁定/解锁。"""
+def toggle(locked: bool, pw: str, *, bypass: bool = False) -> tuple[bool, str]:
+    """锁定/解锁。bypass=True 时跳过密码校验（本机调用）。"""
     d = _load()
     if not d["password_hash"]:
         return False, "还没设置密码"
-    if not verify(pw or ""):
+    if not bypass and not verify(pw or ""):
         return False, "密码错误"
     d["locked"] = bool(locked)
     _save(d)

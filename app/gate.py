@@ -49,12 +49,13 @@ def verify(pw: str) -> bool:
     return bool(h) and h == _hash(pw or "")
 
 
-def set_password(pw: str, old_pw: str | None = None) -> tuple[bool, str]:
+def set_password(pw: str, old_pw: str | None = None,
+                 *, bypass: bool = False) -> tuple[bool, str]:
     pw = (pw or "").strip()
     if len(pw) < 4:
         return False, "密码至少 4 位"
     d = _load()
-    if d["password_hash"] and not verify(old_pw or ""):
+    if d["password_hash"] and not bypass and not verify(old_pw or ""):
         return False, "旧密码错误"
     d["password_hash"] = _hash(pw)
     _save(d)
