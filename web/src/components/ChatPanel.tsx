@@ -1,6 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { streamSSE } from "../api";
 import type { ChatMsg, GenSettings, Provider } from "../types";
+
+function isAbortError(e: unknown): boolean {
+  return e instanceof Error && e.name === "AbortError";
+}
 
 interface Props {
   ready: boolean;
@@ -21,6 +25,16 @@ export default function ChatPanel({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  // 每次发送新建 controller；复用已 abort 的那个会让下一次请求刚发出就被取消
+  const ctrlRef = useRef<AbortController | null>(null);
+  const reqRef = useRef(0);
+
+  useEffect(() => {
+    // 对话 tab 卸掉时组件会卸载，生成中的流不能留在后台继续跑
+    return () => {
+      ctrlRef.current?.abort();
+    };
+  }, []);
 
   const scrollBottom = () => {
     requestAnimationFrame(() => {
@@ -44,6 +58,7 @@ export default function ChatPanel({
     scrollBottom();
 
     const path = useAgent ? "/api/agent/stream" : "/api/chat/stream";
+    // 只带 role/content。中断时累积的 tool 步骤留在当轮闭包里，不能混进下一次请求
     const body = {
       messages: history.map((m) => ({ role: m.role, content: m.content })),
       provider,
@@ -52,11 +67,16 @@ export default function ChatPanel({
       max_tokens: settings.max_tokens,
     };
 
+    const req = ++reqRef.current;
+    const ctrl = new AbortController();
+    ctrlRef.current = ctrl;
+
     let acc = "";
     let route: ChatMsg["route"] = null;
     const steps: string[] = [];
 
     const paint = (patch: Partial<ChatMsg>) => {
+      if (reqRef.current !== req) return;
       setMsgs((prev) => {
         if (prev.length === 0) return prev;
         const next = [...prev];
@@ -66,7 +86,8 @@ export default function ChatPanel({
     };
 
     try {
-      for await (const f of streamSSE(path, body)) {
+      for await (const f of streamSSE(path, body, ctrl.signal)) {
+        if (ctrl.signal.aborted) break;
         if (f.error) throw new Error(f.error);
         if (f.route) route = { label: f.route.label, reason: f.route.reason };
         if (f.step_start?.tool) steps.push(f.step_start.tool);
@@ -75,17 +96,26 @@ export default function ChatPanel({
         paint({ content: acc, route, steps: [...steps] });
         scrollBottom();
       }
+      // 用户取消时保留已写出的字，不要换成「没有输出」
+      if (ctrl.signal.aborted) return;
       if (!acc.trim()) {
         paint({ content: "（模型没有输出内容，重发试试）", failed: true });
       }
     } catch (e) {
+      if (isAbortError(e) || ctrl.signal.aborted) return;
       const msg = e instanceof Error ? e.message : String(e);
       paint({ content: msg, failed: true });
       onToast(msg, true);
     } finally {
-      setBusy(false);
+      if (ctrlRef.current === ctrl) ctrlRef.current = null;
+      // 旧请求晚到的 finally 不能把新一轮的 busy 清掉
+      if (reqRef.current === req) setBusy(false);
       scrollBottom();
     }
+  }
+
+  function stop() {
+    ctrlRef.current?.abort();
   }
 
   return (
@@ -139,8 +169,12 @@ export default function ChatPanel({
               }
             }}
           />
-          <button className="primary" disabled={busy || !input.trim()} onClick={send}>
-            {busy ? "生成中…" : "发送"}
+          <button
+            className="primary"
+            disabled={!busy && !input.trim()}
+            onClick={busy ? stop : send}
+          >
+            {busy ? "停止" : "发送"}
           </button>
         </div>
         <div className="hint">
