@@ -24,6 +24,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -1213,7 +1214,7 @@ def make_chart(spec: str) -> str:
     import json as _json
 
     try:
-        d = _json.loads(spec or "{}")
+        d = _loads_loose(spec or "{}")
     except _json.JSONDecodeError as e:
         return f"[错误] spec 不是合法 JSON：{e}"
 
@@ -1839,6 +1840,68 @@ def edit_file(path: str, old_string: str, new_string: str,
     p.write_text(new_text, encoding="utf-8")
     n = cnt if replace_all else 1
     return f"[已修改] {p}  替换 {n} 处（备份：{bak}）"
+
+
+def _loads_loose(raw: str) -> dict:
+    """宽松解析模型生成的 JSON。
+
+    本地 30B 写 JSON 常见三种错误，严格的 json.loads 会直接拒绝：
+      1. 漏闭合括号   {"a":1,"b":[1,2]     ← 少一个 }
+      2. 尾逗号       {"a":1,}             ← 多一个 ,
+      3. 包了代码围栏  ```json ... ```
+
+    依次尝试：去围栏 → 去尾逗号 → 补括号，全部失败才抛原始错误。
+    实测 30B 在 make_chart 的 spec 上漏括号是高频失败（4/4 次），
+    这一层兜底比让 agent 重试更有效——重试也是同样的错。
+    """
+    s = (raw or "").strip()
+
+    # 去掉 ```json ... ``` 围栏
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\s*", "", s)
+        s = re.sub(r"\s*```\s*$", "", s)
+        s = s.strip()
+
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+
+    # 去尾逗号（只处理 } 和 ] 前的逗号，字符串内的不动）
+    cleaned = re.sub(r",\s*([}\]])", r"\1", s)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # 补不配对的闭合括号。跳过字符串内部，避免把 "{" 当成结构括号。
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for ch in cleaned:
+        if esc:
+            esc = False
+        elif ch == "\\":
+            esc = True
+        elif ch == '"':
+            in_str = not in_str
+        elif in_str:
+            continue
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "}]" and stack and stack[-1] == ch:
+            stack.pop()
+    if stack:
+        repaired = cleaned + "".join(reversed(stack))
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
+    # 都失败：抛原始错误，调用方给可读提示
+    return json.loads(s)
 
 
 def write_file(path: str, content: str, mode: str = "overwrite") -> str:
