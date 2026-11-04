@@ -50,6 +50,8 @@ export interface ChatMsg {
   route?: { label: string; reason: string } | null;
   steps?: string[];
   failed?: boolean;
+  ttft?: number;      // 首 token 延迟（秒）
+  elapsed?: number;   // 总耗时（秒）
 }
 
 export interface StreamFrame {

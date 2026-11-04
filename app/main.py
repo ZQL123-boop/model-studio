@@ -986,7 +986,12 @@ def agent_sessions(limit: int = 20):
 
 @app.post("/api/agent/stream")
 async def agent_stream(req: ChatReq, request: Request):
-    """带文件工具的 agent。状态管理、计划注入、卡住检测都在 app/agent.py。"""
+    """带文件工具的 agent。状态管理、计划注入、卡住检测都在 app/agent.py。
+
+    **只允许本机**：20 个工具里有 run_bash / write_file / read_file，
+    远程能用等于把 shell 交出去。远程走 /api/chat/stream（只有 5 个只读工具）。
+    """
+    _require_local(request)
     t = await resolve_target(req.provider, req.messages)
 
     async def sse(obj: dict) -> str:

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { streamSSE } from "../api";
+import { isLocalHost } from "../auth";
 import type { ChatMsg, GenSettings, Provider } from "../types";
 
 function isAbortError(e: unknown): boolean {
@@ -25,6 +26,8 @@ export default function ChatPanel({
   useAgent, onUseAgentChange, settings, onToast,
   msgs, setMsgs,
 }: Props) {
+  // agent 有 20 个工具（含 run_bash、write_file），等于远程 shell，只允许本机跑
+  const agentOk = isLocalHost();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -60,7 +63,7 @@ export default function ChatPanel({
     setBusy(true);
     scrollBottom();
 
-    const path = useAgent ? "/api/agent/stream" : "/api/chat/stream";
+    const path = useAgent && agentOk ? "/api/agent/stream" : "/api/chat/stream";
     // 只带 role/content。中断时累积的 tool 步骤留在当轮闭包里，不能混进下一次请求
     const body = {
       messages: history.map((m) => ({ role: m.role, content: m.content })),
@@ -96,6 +99,11 @@ export default function ChatPanel({
         if (f.step_start?.tool) steps.push(f.step_start.tool);
         if (f.t) acc += f.t;
         if (f.answer) acc = f.answer; // agent 末帧是完整答案，覆盖增量
+        if (f.done) {
+          paint({ content: acc, route, steps: [...steps], ttft: f.ttft_s, elapsed: f.elapsed_s });
+          scrollBottom();
+          continue;
+        }
         paint({ content: acc, route, steps: [...steps] });
         scrollBottom();
       }
@@ -155,6 +163,12 @@ export default function ChatPanel({
             <div className={`bubble${m.failed ? " failed" : ""}`}>
               {m.content || (busy && i === msgs.length - 1 ? "…" : "")}
             </div>
+            {m.role === "assistant" && m.elapsed != null && (
+              <div className="msg-meta">
+                {m.ttft != null && <span>首 token {m.ttft.toFixed(2)}s</span>}
+                <span>总耗时 {m.elapsed.toFixed(1)}s</span>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -181,13 +195,17 @@ export default function ChatPanel({
           </button>
         </div>
         <div className="hint">
-          <label style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <label
+            style={{ display: "flex", alignItems: "center", gap: 5, opacity: agentOk ? 1 : .45 }}
+            title={agentOk ? "" : "agent 有 run_bash，等于远程 shell，只允许本机使用"}
+          >
             <input
               type="checkbox"
-              checked={useAgent}
+              checked={useAgent && agentOk}
+              disabled={!agentOk}
               onChange={(e) => onUseAgentChange(e.target.checked)}
             />
-            agent 模式
+            agent 模式{agentOk ? "" : "（仅本机）"}
           </label>
           <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
             <option value="auto">自动选型</option>

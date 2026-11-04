@@ -1,4 +1,5 @@
 import type { LocalModel, ModelStatus } from "../types";
+import { isLocalHost } from "../auth";
 
 interface Props {
   models: LocalModel[];
@@ -64,8 +65,16 @@ export default function ModelList({
             停止
           </button>
         </div>
-        <button disabled={busy} onClick={onClean}>
-          🧹 一键清理内存
+        <button
+          disabled={busy || !isLocalHost()}
+          onClick={onClean}
+          title={
+            isLocalHost()
+              ? "停模型 + 杀残留 mlx 进程，报告释放量"
+              : "清理内存只能在这台 Mac 上操作"
+          }
+        >
+          🧹 一键清理内存{isLocalHost() ? "" : "（仅本机）"}
         </button>
         <div className="hint">
           {running ? "同一时刻只能跑一个本地模型" : "启动约需 10~30 秒（加载权重）"}
