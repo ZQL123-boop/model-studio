@@ -5,6 +5,7 @@ import type {
   GateStatus,
   GenSettings,
   LocalModel,
+  LockStatus,
   ModelStatus,
   ModelsResp,
   Provider,
@@ -23,6 +24,7 @@ import DesignPanel from "./components/DesignPanel";
 import ComparePanel from "./components/ComparePanel";
 import ThemeSwitcher from "./components/ThemeSwitcher";
 import WriteProtectSwitch from "./components/WriteProtectSwitch";
+import PasswordModal, { type PwAsk } from "./components/PasswordModal";
 
 // 模块加载即执行：把 URL 里的 ?token=xxx 落进 sessionStorage 并清理地址栏。
 // 必须早于任何 fetch，否则首屏请求会因缺 token 直接 401。
@@ -86,6 +88,8 @@ export default function App() {
     () => localStorage.getItem("ms_accent") || "#58a6ff",
   );
   const [wp, setWp] = useState<boolean | null>(null);
+  // 打开设置前要验锁密码（本会话验过就记住）
+  const [settingsAsk, setSettingsAsk] = useState<PwAsk | null>(null);
 
   // loadModels 里要判断"是否已选"，用 ref 避免把它塞进依赖导致重复拉取
   const selectedRef = useRef<LocalModel | null>(null);
@@ -245,6 +249,38 @@ export default function App() {
     }
   }
 
+  /**
+   * 打开设置前验密码：复用模型锁密码（/api/lock/verify 只验不改状态）。
+   * 本会话验过一次就记住，免得每点一次都弹。
+   * 没设锁密码时不拦——没有可验证的东西，硬拦会让用户无从下手。
+   */
+  async function openSettings() {
+    try {
+      if (sessionStorage.getItem("ms_settings_ok") === "1") {
+        setSettingsOpen(true);
+        return;
+      }
+      const st = await getJSON<LockStatus>("/api/lock/status");
+      if (!st.has_password) {
+        setSettingsOpen(true);
+        return;
+      }
+      const pw = await new Promise<string>((resolve) =>
+        setSettingsAsk({ title: "输入锁密码以打开设置", resolve }),
+      );
+      if (!pw) return;
+      await postJSON("/api/lock/verify", { password: pw });
+      try {
+        sessionStorage.setItem("ms_settings_ok", "1");
+      } catch {
+        /* 隐私模式 */
+      }
+      setSettingsOpen(true);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), true);
+    }
+  }
+
   if (gateOk === null) {
     return (
       <div className="gate">
@@ -312,7 +348,7 @@ export default function App() {
         <WriteProtectSwitch on={wp} onToggle={toggleWp} />
         <ThemeSwitcher accent={accent} onChange={setAccent} />
         <button onClick={loadModels}>刷新模型</button>
-        <button onClick={() => setSettingsOpen(true)}>⚙️ 设置</button>
+        <button onClick={openSettings}>⚙️ 设置</button>
       </header>
 
       <div className="main">
@@ -375,6 +411,14 @@ export default function App() {
         onChange={setSettings}
         onClose={() => setSettingsOpen(false)}
         onToast={toast}
+      />
+
+      <PasswordModal
+        ask={settingsAsk}
+        onDone={(v) => {
+          settingsAsk?.resolve(v);
+          setSettingsAsk(null);
+        }}
       />
 
       <div className="toasts">
