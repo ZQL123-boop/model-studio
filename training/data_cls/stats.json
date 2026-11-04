@@ -1,0 +1,99 @@
+{
+  "seed": 20261101,
+  "train": 1127,
+  "valid": 70,
+  "test": 70,
+  "ood": 207,
+  "per_tool": {
+    "analyze_data": {
+      "total": 31,
+      "train": 48,
+      "test": 3
+    },
+    "design": {
+      "total": 33,
+      "train": 51,
+      "test": 3
+    },
+    "edit_file": {
+      "total": 24,
+      "train": 42,
+      "test": 2
+    },
+    "fetch_url": {
+      "total": 26,
+      "train": 88,
+      "test": 3
+    },
+    "find_files": {
+      "total": 24,
+      "train": 44,
+      "test": 2
+    },
+    "generate_image": {
+      "total": 39,
+      "train": 54,
+      "test": 4
+    },
+    "get_exchange_rate": {
+      "total": 40,
+      "train": 56,
+      "test": 4
+    },
+    "get_weather": {
+      "total": 52,
+      "train": 66,
+      "test": 5
+    },
+    "grep_code": {
+      "total": 31,
+      "train": 49,
+      "test": 3
+    },
+    "knowledge_search": {
+      "total": 44,
+      "train": 107,
+      "test": 4
+    },
+    "list_dir": {
+      "total": 31,
+      "train": 49,
+      "test": 3
+    },
+    "make_chart": {
+      "total": 36,
+      "train": 52,
+      "test": 4
+    },
+    "office": {
+      "total": 26,
+      "train": 43,
+      "test": 3
+    },
+    "read_file": {
+      "total": 62,
+      "train": 73,
+      "test": 6
+    },
+    "run_bash": {
+      "total": 47,
+      "train": 61,
+      "test": 5
+    },
+    "set_goal": {
+      "total": 24,
+      "train": 44,
+      "test": 2
+    },
+    "web_search": {
+      "total": 109,
+      "train": 158,
+      "test": 11
+    },
+    "write_file": {
+      "total": 26,
+      "train": 42,
+      "test": 3
+    }
+  }
+}
