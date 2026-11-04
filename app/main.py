@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import agent, gate, gateway, guard, lock, memclean, memory, models, persona, providers, rag, router, scheduler, sysinfo, tokens, tools
+from . import agent, gate, gateway, guard, memclean, memory, models, persona, providers, rag, router, scheduler, sysinfo, tokens, tools
 from .gateway import ensure_local_ready
 from .runner import LOG_DIR, runner
 
@@ -86,7 +86,6 @@ async def guard_remote(request, call_next):
     if path == "/" or path.startswith(("/static", "/assets")) \
             or path == "/api/health" \
             or path.startswith("/api/gate") \
-            or path == "/api/lock/status" \
             or path == "/api/public/status":
         return await call_next(request)
     if path.startswith("/v1"):
@@ -1624,41 +1623,6 @@ def legacy_client():
 
 
 
-class LockToggleReq(BaseModel):
-    locked: bool
-    password: str = ""      # 本机不需要；远程必须
-
-
-class LockPasswordReq(BaseModel):
-    password: str
-    old_password: str | None = None
-
-
-@app.get("/api/lock/status")
-def lock_status():
-    return lock.status()
-
-
-@app.post("/api/lock/toggle")
-def lock_toggle(req: LockToggleReq, request: Request):
-    _require_local(request)
-    ok, msg = lock.toggle(req.locked, req.password,
-                          bypass=_is_local_request(request))
-    if not ok:
-        raise HTTPException(400, msg)
-    return {"locked": req.locked, "msg": msg}
-
-
-@app.post("/api/lock/password")
-def lock_password(req: LockPasswordReq, request: Request):
-    _require_local(request)
-    ok, msg = lock.set_password(req.password, req.old_password,
-                                bypass=_is_local_request(request))
-    if not ok:
-        raise HTTPException(400, msg)
-    return {"msg": msg}
-
-
 class GateVerifyReq(BaseModel):
     password: str
 
@@ -1738,32 +1702,17 @@ def public_toggle(req: PublicToggleReq):
 
 class TokenAddReq(BaseModel):
     name: str
-    password: str
 
 
 class TokenToggleReq(BaseModel):
     name_or_token: str
     enabled: bool
-    password: str
 
 
 class TokenRemoveReq(BaseModel):
-    """删除只要名字+密码。之前复用 TokenToggleReq，enabled 是必填，
+    """删除只要名字。之前复用 TokenToggleReq，enabled 是必填，
     前端删除时不发 enabled → 永远 422，token 根本删不掉。"""
     name_or_token: str
-    password: str
-
-
-def _require_lock(password: str, request: Request | None = None):
-    """管理类操作（token / 锁切换）要求锁密码。
-
-    **本机放行**：本机就是主人，物理接触已是最高权限，再要密码只是给自己添堵。
-    密码挡的是远程（funnel 转发 / 局域网别的设备）。
-    """
-    if request is not None and _is_local_request(request):
-        return
-    if lock.is_locked() and not lock.check(password or ""):
-        raise HTTPException(403, "需要锁密码才能管理 token")
 
 
 def _is_local_request(request: Request) -> bool:
@@ -1786,20 +1735,10 @@ def _require_local(request: Request):
     raise HTTPException(403, "此操作只能在本机（Mac）上进行")
 
 
-class TokenListReq(BaseModel):
-    password: str
-
-
 @app.post("/api/tokens")
-def tokens_list(req: TokenListReq, request: Request):
-    """列出附加 token（脱敏）。本机免密，远程要锁密码。
-
-    清单里有每个 token 的前缀和启用状态，之前 GET 裸奔，
-    任何人拿到网址就能看到别人有几个 token。
-    """
-    if not lock.has_password():
-        raise HTTPException(400, "还没设置锁密码，先在设置里设一个")
-    _require_lock(req.password, request)
+def tokens_list(request: Request):
+    """列出附加 token（脱敏）。只能本机——锁已移除，控制权靠 _require_local。"""
+    _require_local(request)
     return {"master_preview": (tokens.master_token() or "")[:8] + "…",
             "tokens": tokens.list_tokens()}
 
@@ -1807,7 +1746,6 @@ def tokens_list(req: TokenListReq, request: Request):
 @app.post("/api/tokens/add")
 def tokens_add(req: TokenAddReq, request: Request):
     _require_local(request)
-    _require_lock(req.password, request)
     ok, msg, tok = tokens.add(req.name)
     if not ok:
         raise HTTPException(400, msg)
@@ -1817,7 +1755,6 @@ def tokens_add(req: TokenAddReq, request: Request):
 @app.post("/api/tokens/toggle")
 def tokens_toggle(req: TokenToggleReq, request: Request):
     _require_local(request)
-    _require_lock(req.password, request)
     ok, msg = tokens.toggle(req.name_or_token, req.enabled)
     if not ok:
         raise HTTPException(400, msg)
@@ -1827,26 +1764,10 @@ def tokens_toggle(req: TokenToggleReq, request: Request):
 @app.post("/api/tokens/remove")
 def tokens_remove(req: TokenRemoveReq, request: Request):
     _require_local(request)
-    _require_lock(req.password, request)
     ok, msg = tokens.remove(req.name_or_token)
     if not ok:
         raise HTTPException(400, msg)
     return {"msg": msg}
-
-
-class LockVerifyReq(BaseModel):
-    password: str
-
-
-@app.post("/api/lock/verify")
-def lock_verify(req: LockVerifyReq):
-    """验证锁密码（只验不改状态）。供记忆界面解锁用。
-
-    不限制本机——远程的人有正确密码也能查看记忆；没密码就看不到。
-    """
-    if not lock.check(req.password or ""):
-        raise HTTPException(401, "密码错误")
-    return {"ok": True}
 
 
 @app.get("/api/preview")

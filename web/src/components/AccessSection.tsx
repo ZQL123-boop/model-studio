@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getJSON, postJSON } from "../api";
-import type { AccessToken, GateStatus, LockStatus } from "../types";
+import type { AccessToken, GateStatus } from "../types";
 
 interface Props {
   askPassword: (title: string) => Promise<string>;
@@ -9,11 +9,16 @@ interface Props {
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * 访问控制：界面门禁 + 访问 token。
+ *
+ * 模型锁已移除——本机免密、远程的控制权操作本来就被 `_require_local` 挡住，
+ * 锁密码只剩「远程管 token」一个用途，而那个也被 `_require_local` 拦了，
+ * 等于死功能。
+ */
 export default function AccessSection({ askPassword, onToast }: Props) {
   const [gate, setGate] = useState<GateStatus | null>(null);
-  const [lock, setLock] = useState<LockStatus | null>(null);
 
-  const [tokenPw, setTokenPw] = useState("");
   const [tokens, setTokens] = useState<AccessToken[] | null>(null);
   const [masterPreview, setMasterPreview] = useState("");
   const [newName, setNewName] = useState("");
@@ -21,12 +26,7 @@ export default function AccessSection({ askPassword, onToast }: Props) {
 
   const refresh = useCallback(async () => {
     try {
-      const [g, l] = await Promise.all([
-        getJSON<GateStatus>("/api/gate/status"),
-        getJSON<LockStatus>("/api/lock/status"),
-      ]);
-      setGate(g);
-      setLock(l);
+      setGate(await getJSON<GateStatus>("/api/gate/status"));
     } catch {
       /* 后端重启中，静默 */
     }
@@ -68,57 +68,13 @@ export default function AccessSection({ askPassword, onToast }: Props) {
     }
   }
 
-  /* ------------------------------------------------------------ 模型锁 */
-  async function setLockPw() {
-    const needOld = !!lock?.has_password;
-    const old = needOld ? await askPassword("输入旧的锁密码") : "";
-    if (needOld && !old) return;
-    const pw = await askPassword("设置新锁密码（至少 4 位）");
-    if (!pw) return;
-    try {
-      await postJSON("/api/lock/password", {
-        password: pw,
-        old_password: needOld ? old : undefined,
-      });
-      onToast("锁密码已设置，模型已锁定");
-      refresh();
-    } catch (e) {
-      onToast(errMsg(e), true);
-    }
-  }
-
-  async function toggleLock() {
-    if (!lock) return;
-    if (!lock.has_password) {
-      onToast("还没设置锁密码", true);
-      return;
-    }
-    const target = !lock.locked;
-    const pw = await askPassword(target ? "输入锁密码以锁定" : "输入锁密码以解锁");
-    if (!pw) return;
-    try {
-      await postJSON("/api/lock/toggle", { locked: target, password: pw });
-      onToast(target ? "已锁定" : "已解锁");
-      refresh();
-    } catch (e) {
-      onToast(errMsg(e), true);
-    }
-  }
-
   /* ------------------------------------------------------------ Token */
   async function openTokens() {
-    if (!lock?.has_password) {
-      onToast("先设置锁密码，才能管理 token", true);
-      return;
-    }
-    const pw = tokenPw || (await askPassword("输入锁密码打开 token 管理"));
-    if (!pw) return;
     try {
       const d = await postJSON<{ master_preview: string; tokens: AccessToken[] }>(
         "/api/tokens",
-        { password: pw },
+        {},
       );
-      setTokenPw(pw);
       setTokens(d.tokens);
       setMasterPreview(d.master_preview);
     } catch (e) {
@@ -130,10 +86,7 @@ export default function AccessSection({ askPassword, onToast }: Props) {
     const name = newName.trim();
     if (!name) return;
     try {
-      const d = await postJSON<{ msg: string; token: string }>("/api/tokens/add", {
-        name,
-        password: tokenPw,
-      });
+      const d = await postJSON<{ msg: string; token: string }>("/api/tokens/add", { name });
       setNewName("");
       setNewTok(d.token);
       onToast("已生成，复制给要分享的人");
@@ -148,7 +101,6 @@ export default function AccessSection({ askPassword, onToast }: Props) {
       await postJSON("/api/tokens/toggle", {
         name_or_token: t.name,
         enabled: !t.enabled,
-        password: tokenPw,
       });
       await openTokens();
     } catch (e) {
@@ -159,10 +111,7 @@ export default function AccessSection({ askPassword, onToast }: Props) {
   async function removeToken(t: AccessToken) {
     if (!window.confirm(`删除 token「${t.name}」？`)) return;
     try {
-      await postJSON("/api/tokens/remove", {
-        name_or_token: t.name,
-        password: tokenPw,
-      });
+      await postJSON("/api/tokens/remove", { name_or_token: t.name });
       onToast("已删除");
       await openTokens();
     } catch (e) {
@@ -177,7 +126,7 @@ export default function AccessSection({ askPassword, onToast }: Props) {
       <div className="set-item">
         <div className="set-main" onClick={setGatePw}>
           <div className="set-title">🔑 界面门禁</div>
-          <div className="set-sub">打开界面要密码</div>
+          <div className="set-sub">远程打开界面要密码</div>
         </div>
         <div className="set-side">
           <span className={gate?.has_password ? "st-on" : "st-off"}>
@@ -189,28 +138,10 @@ export default function AccessSection({ askPassword, onToast }: Props) {
         </div>
       </div>
 
-      <div className="set-item">
-        <div
-          className="set-main"
-          onClick={lock?.has_password ? toggleLock : setLockPw}
-        >
-          <div className="set-title">🔒 模型锁</div>
-          <div className="set-sub">启停模型要密码</div>
-        </div>
-        <div className="set-side">
-          <span className={lock?.locked ? "st-on" : "st-off"}>
-            {lock?.locked ? "已锁定" : lock?.has_password ? "已解锁" : "未设置"}
-          </span>
-          <button className="mini" onClick={setLockPw}>
-            {lock?.has_password ? "改密码" : "设密码"}
-          </button>
-        </div>
-      </div>
-
       <div className="set-item column">
         <div className="set-main" onClick={openTokens}>
           <div className="set-title">👤 访问 token</div>
-          <div className="set-sub">给不同人发不同 token</div>
+          <div className="set-sub">远程调 API 要带，给不同人发不同 token</div>
         </div>
         <span className="set-arrow">›</span>
 

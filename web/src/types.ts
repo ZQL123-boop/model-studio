@@ -86,11 +86,6 @@ export interface GateStatus {
   has_password: boolean;
 }
 
-export interface LockStatus {
-  locked: boolean;
-  has_password: boolean;
-}
-
 export interface AccessToken {
   name: string;
   token: string;
