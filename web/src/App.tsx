@@ -21,6 +21,8 @@ import RagPanel from "./components/RagPanel";
 import MemoryPanel from "./components/MemoryPanel";
 import DesignPanel from "./components/DesignPanel";
 import ComparePanel from "./components/ComparePanel";
+import ThemeSwitcher from "./components/ThemeSwitcher";
+import WriteProtectSwitch from "./components/WriteProtectSwitch";
 
 // 模块加载即执行：把 URL 里的 ?token=xxx 落进 sessionStorage 并清理地址栏。
 // 必须早于任何 fetch，否则首屏请求会因缺 token 直接 401。
@@ -79,6 +81,11 @@ export default function App() {
   const [gateOk, setGateOk] = useState<boolean | null>(null);
   // 远程访问缺 token 时置 true，渲染 TokenSetup
   const [needToken, setNeedToken] = useState(false);
+  // 主界面上的两个常用开关（原来藏在设置抽屉里）
+  const [accent, setAccent] = useState(
+    () => localStorage.getItem("ms_accent") || "#58a6ff",
+  );
+  const [wp, setWp] = useState<boolean | null>(null);
 
   // loadModels 里要判断"是否已选"，用 ref 避免把它塞进依赖导致重复拉取
   const selectedRef = useRef<LocalModel | null>(null);
@@ -92,6 +99,23 @@ export default function App() {
       /* 隐私模式写不进去，无所谓 */
     }
   }, [settings]);
+
+  // 主题色：改 CSS 变量 + 落盘，刷新后还在
+  useEffect(() => {
+    document.documentElement.style.setProperty("--accent", accent);
+    try {
+      localStorage.setItem("ms_accent", accent);
+    } catch {
+      /* 隐私模式 */
+    }
+  }, [accent]);
+
+  // 写保护状态：进来拉一次（后端是唯一真相，刷新页面不会显示错）
+  useEffect(() => {
+    getJSON<{ on: boolean }>("/api/tools/write-protect")
+      .then((d) => setWp(d.on))
+      .catch(() => {});
+  }, []);
 
   const toast = useCallback((msg: string, err = false) => {
     const id = Date.now() + Math.random();
@@ -211,6 +235,16 @@ export default function App() {
     }
   };
 
+  async function toggleWp() {
+    try {
+      const d = await postJSON<{ on: boolean }>("/api/tools/write-protect", { on: !wp });
+      setWp(d.on);
+      toast(d.on ? "已开启写保护：不覆盖已存在文件" : "已关闭写保护");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), true);
+    }
+  }
+
   if (gateOk === null) {
     return (
       <div className="gate">
@@ -275,6 +309,8 @@ export default function App() {
           CPU <b>{status ? `${status.sys.cpu_pct.toFixed(0)}%` : "—"}</b>
         </span>
         <span className="spacer" />
+        <WriteProtectSwitch on={wp} onToggle={toggleWp} />
+        <ThemeSwitcher accent={accent} onChange={setAccent} />
         <button onClick={loadModels}>刷新模型</button>
         <button onClick={() => setSettingsOpen(true)}>⚙️ 设置</button>
       </header>

@@ -761,6 +761,51 @@ button.mini { font-size: 11px; padding: 2px 8px; }
   .compare-col + .compare-col { border-left: 0; border-top: 1px solid var(--border); }
 }
 
+/* ---------------------------------------------------------------- 顶栏控件 */
+.wp-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.wp-switch:hover { color: var(--text); }
+.wp-label { font-size: 12px; }
+
+.theme-switch { position: relative; }
+.theme-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.theme-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, .25);
+  flex: none;
+}
+.theme-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  animation: pop .14s ease-out;
+}
+
 @media (max-width: 1080px) {
   .main { grid-template-columns: 240px minmax(0, 1fr); }
   .col.right { display: none; }
