@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getJSON, postJSON } from "./api";
+import { getJSON, postJSON, NeedTokenError } from "./api";
 import type {
   CleanResult,
   GateStatus,
@@ -15,10 +15,16 @@ import StatusPanel from "./components/StatusPanel";
 import LogView from "./components/LogView";
 import SettingsDrawer from "./components/SettingsDrawer";
 import GateLogin from "./components/GateLogin";
+import TokenSetup from "./components/TokenSetup";
+import { initToken } from "./auth";
 import RagPanel from "./components/RagPanel";
 import MemoryPanel from "./components/MemoryPanel";
 import DesignPanel from "./components/DesignPanel";
 import ComparePanel from "./components/ComparePanel";
+
+// 模块加载即执行：把 URL 里的 ?token=xxx 落进 sessionStorage 并清理地址栏。
+// 必须早于任何 fetch，否则首屏请求会因缺 token 直接 401。
+initToken();
 
 const TABS = [
   ["chat", "对话"],
@@ -71,6 +77,8 @@ export default function App() {
   const [tab, setTab] = useState<TabKey>("chat");
   // null = 还在查；true = 放行；false = 要输密码
   const [gateOk, setGateOk] = useState<boolean | null>(null);
+  // 远程访问缺 token 时置 true，渲染 TokenSetup
+  const [needToken, setNeedToken] = useState(false);
 
   // loadModels 里要判断"是否已选"，用 ref 避免把它塞进依赖导致重复拉取
   const selectedRef = useRef<LocalModel | null>(null);
@@ -97,7 +105,11 @@ export default function App() {
       setModels(d.local || []);
       if (d.api) setProviders(d.api);
       if (!selectedRef.current) setSelected(d.local?.[0] ?? null);
-    } catch {
+    } catch (e) {
+      if (e instanceof NeedTokenError) {
+        setNeedToken(true); // 远程缺 token：交给 TokenSetup 层，别弹「加载失败」
+        return;
+      }
       toast("加载模型列表失败", true);
     }
   }, [toast]);
@@ -115,8 +127,9 @@ export default function App() {
         if (!alive) return;
         setStatus(s);
         if (s.providers) setProviders(s.providers);
-      } catch {
-        /* 忽略 */
+      } catch (e) {
+        if (e instanceof NeedTokenError) setNeedToken(true);
+        /* 其余忽略：后端重启中，不该刷屏 */
       }
     };
     tick();
@@ -218,6 +231,17 @@ export default function App() {
             /* 隐私模式 */
           }
           setGateOk(true);
+        }}
+      />
+    );
+  }
+
+  if (needToken) {
+    return (
+      <TokenSetup
+        onDone={() => {
+          setNeedToken(false);
+          loadModels();
         }}
       />
     );
