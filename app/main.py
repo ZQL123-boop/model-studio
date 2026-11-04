@@ -80,7 +80,11 @@ async def guard_remote(request, call_next):
     # 登录层/锁按钮/公网按钮要在填 token 之前就能查到状态。
     # 不放行的话，公网端填 token 前 status 请求 401，前端状态停在默认值，
     # 导致"锁图标提示设密码""启动不弹密码框"。
-    if path == "/" or path.startswith("/static") or path == "/api/health" \
+    # /assets 是前端编译产物（JS/CSS），和 /static 一样只含静态资源、不含敏感数据。
+    # 不放行的话远程访问会白屏：index.html 走白名单能加载，但 /assets/*.js 被 401 拦掉，
+    # 页面只剩空的 #root。本机免 token 所以本机看不出这个 bug。
+    if path == "/" or path.startswith(("/static", "/assets")) \
+            or path == "/api/health" \
             or path.startswith("/api/gate") \
             or path == "/api/lock/status" \
             or path == "/api/public/status":
