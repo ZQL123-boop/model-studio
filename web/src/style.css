@@ -169,6 +169,74 @@ button.danger:hover:not(:disabled) { border-color: var(--red); }
 }
 .download:hover { border-color: var(--accent); background: var(--panel); }
 
+/* ---------------------------------------------------------------- 工具追踪 */
+.trace-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  min-height: 0;
+}
+.trace-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--panel);
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color .15s;
+}
+.trace-item:hover { border-color: var(--accent); }
+.trace-item.open { border-color: var(--accent); }
+.trace-item.bad { border-color: #5a2a2a; }
+.trace-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.trace-time {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.trace-tool {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11.5px;
+}
+.trace-ms {
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.trace-ok { color: #3fb950; font-size: 12px; flex: none; }
+.trace-item.bad .trace-ok { color: var(--red); }
+.trace-bad { color: var(--red); }
+.trace-detail {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.trace-label {
+  font-size: 10px;
+  color: var(--dim);
+  margin-bottom: 3px;
+  letter-spacing: .05em;
+}
+.trace-detail pre {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.trace-detail pre:last-child { margin-bottom: 0; }
+
 .routechip {
   font-size: 11px;
   color: var(--dim);

@@ -63,7 +63,7 @@ export interface StreamFrame {
   error?: string;
   answer?: string;
   step_start?: { tool: string; args?: unknown };
-  step?: { tool: string; preview?: string };
+  step?: { tool: string; args?: unknown; preview?: string; ms?: number };
   ttft_s?: number;
   elapsed_s?: number;
   chunks?: number;
@@ -71,8 +71,18 @@ export interface StreamFrame {
   changed?: string[];   // agent done 帧：本次写过的路径
 }
 
-export interface CleanResult {
-  before_gb: number;
+/** 一次工具调用的追踪记录（trace 面板用）。 */
+export interface TraceItem {
+  id: string;
+  at: number;          // 开始时间（ms 时间戳）
+  tool: string;
+  args: Record<string, unknown>;
+  preview: string;
+  ms?: number;
+  ok: boolean;
+}
+
+export interface CleanResult {  before_gb: number;
   after_gb: number;
   freed_gb: number;
   killed: { pid: number; rss_gb: number }[];

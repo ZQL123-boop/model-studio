@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { streamSSE } from "../api";
 import { isLocalHost } from "../auth";
-import type { ChatMsg, GenSettings, Provider } from "../types";
+import type { ChatMsg, GenSettings, Provider, TraceItem } from "../types";
 
 function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === "AbortError";
@@ -19,12 +19,14 @@ interface Props {
   // 消息提升到 App 持有：切到别的 tab 时本组件会卸载，state 放这儿会丢
   msgs: ChatMsg[];
   setMsgs: Dispatch<SetStateAction<ChatMsg[]>>;
+  // 每次工具调用上报一条 trace（给「追踪」面板）
+  onTrace: (t: TraceItem) => void;
 }
 
 export default function ChatPanel({
   ready, providers, provider, onProviderChange,
   useAgent, onUseAgentChange, settings, onToast,
-  msgs, setMsgs,
+  msgs, setMsgs, onTrace,
 }: Props) {
   // 远程也能用 agent，但后端只给它只读工具（不能写文件 / 执行命令）
   const isLocal = isLocalHost();
@@ -97,6 +99,18 @@ export default function ChatPanel({
         if (f.error) throw new Error(f.error);
         if (f.route) route = { label: f.route.label, reason: f.route.reason };
         if (f.step_start?.tool) steps.push(f.step_start.tool);
+        if (f.step?.tool) {
+          const pv = f.step.preview || "";
+          onTrace({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            at: Date.now() - (f.step.ms || 0),
+            tool: f.step.tool,
+            args: (f.step.args || {}) as Record<string, unknown>,
+            preview: pv,
+            ms: f.step.ms,
+            ok: !/^\[(错误|拒绝|重复调用|工具执行失败)/.test(pv),
+          });
+        }
         if (f.t) acc += f.t;
         if (f.answer) acc = f.answer; // agent 末帧是完整答案，覆盖增量
         if (f.done) {

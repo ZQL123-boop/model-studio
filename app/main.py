@@ -1503,14 +1503,16 @@ async def agent_stream(req: ChatReq, request: Request):
                                    if nm not in agent.READ_ONLY_TOOLS]
 
                     # 并行跑只读（多个 read_file 同时进行）
-                    par_results: dict[int, str] = {}
+                    par_results: dict[int, tuple[str, int]] = {}
                     if len(read_items) > 1:
                         async def _one(idx, nm, ar):
-                            return idx, await asyncio.to_thread(tools.call, nm, ar)
+                            _t = time.time()
+                            r = await asyncio.to_thread(tools.call, nm, ar)
+                            return idx, r, int((time.time() - _t) * 1000)
                         done_par = await asyncio.gather(*[
                             _one(i, nm, ar) for i, (_, nm, ar) in enumerate(read_items)
                         ])
-                        par_results = dict(done_par)
+                        par_results = {i: (r, ms) for i, r, ms in done_par}
 
                     # 顺序处理：并行结果 → 写操作
                     ordered = ([(tc, nm, ar, par_results.get(i))
@@ -1519,22 +1521,27 @@ async def agent_stream(req: ChatReq, request: Request):
 
                     for tc, name, args, pre in ordered:
                         yield await sse({"step_start": {"tool": name, "args": args}})
+                        _t_tool = time.time()
 
                         if pre is not None:
-                            # 已并行执行完，补上 state 更新
-                            agent.record(state, name, args, pre)
-                            result, stuck = pre, state.push(name, args)
+                            # 已并行执行完，耗时在 gather 里已经量过
+                            _pre_result, _pre_ms = pre
+                            agent.record(state, name, args, _pre_result)
+                            result, stuck = _pre_result, state.push(name, args)
+                            _ms = _pre_ms
                         else:
                             _blocked = guard.guard_tool(state.goal, name, args)
                             if _blocked:
                                 result, stuck = _blocked, state.push(name, args)
                             else:
                                 result, stuck = agent.execute(state, name, args, tools)
+                            _ms = int((time.time() - _t_tool) * 1000)
 
                         if name == "write_plan":
                             yield await sse({"plan": state.plan, "cursor": state.cursor})
                         yield await sse({"step": {"tool": name, "args": args,
-                                                  "preview": result.replace("\n", " ")[:160]}})
+                                                  "preview": result.replace("\n", " ")[:160],
+                                                  "ms": _ms}})
                         if stuck:
                             # 卡住也要给东西：写存档 + 用日志拼总结，别只丢一句报错
                             try:

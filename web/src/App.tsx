@@ -9,6 +9,7 @@ import type {
   ModelStatus,
   ModelsResp,
   Provider,
+  TraceItem,
 } from "./types";
 import ModelList from "./components/ModelList";
 import ChatPanel from "./components/ChatPanel";
@@ -18,6 +19,7 @@ import SettingsDrawer from "./components/SettingsDrawer";
 import GateLogin from "./components/GateLogin";
 import TokenSetup from "./components/TokenSetup";
 import { initToken, isLocalHost } from "./auth";
+import TracePanel from "./components/TracePanel";
 import RagPanel from "./components/RagPanel";
 import MemoryPanel from "./components/MemoryPanel";
 import DesignPanel from "./components/DesignPanel";
@@ -32,6 +34,7 @@ initToken();
 const TABS = [
   ["chat", "对话"],
   ["compare", "对比"],
+  ["trace", "追踪"],
   ["rag", "知识库"],
   ["memory", "记忆"],
   ["design", "设计"],
@@ -89,8 +92,7 @@ export default function App() {
   const [wp, setWp] = useState<boolean | null>(null);
   // 对话消息提到 App 层：切到别的 tab 时 ChatPanel 会卸载，state 放它里面会丢。
   // 顺手落 sessionStorage，刷新页面也还在（关标签页才清）。
-  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>(() => {
-    try {
+  const [chatMsgs, setChatMsgs] = useState<ChatMsg[]>(() => {    try {
       const raw = sessionStorage.getItem("ms_chat_msgs");
       if (raw) return JSON.parse(raw) as ChatMsg[];
     } catch {
@@ -98,6 +100,8 @@ export default function App() {
     }
     return [];
   });
+  // 工具调用追踪（trace 面板用）
+  const [traces, setTraces] = useState<TraceItem[]>([]);
 
   // loadModels 里要判断"是否已选"，用 ref 避免把它塞进依赖导致重复拉取
   const selectedRef = useRef<LocalModel | null>(null);
@@ -397,10 +401,14 @@ export default function App() {
               onToast={toast}
               msgs={chatMsgs}
               setMsgs={setChatMsgs}
+              onTrace={(t) => setTraces((prev) => [...prev, t])}
             />
           )}
           {tab === "compare" && (
             <ComparePanel providers={providers} settings={settings} onToast={toast} />
+          )}
+          {tab === "trace" && (
+            <TracePanel items={traces} onClear={() => setTraces([])} />
           )}
           {tab === "rag" && <RagPanel onToast={toast} />}
           {tab === "memory" && <MemoryPanel onToast={toast} />}
