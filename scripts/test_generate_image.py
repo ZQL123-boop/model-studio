@@ -92,11 +92,37 @@ def run() -> int:
                 s2 = client.get.call_args_list[1].kwargs["params"]["seed"]
                 check(s1 != s2, "两次 seed 应不同，否则又拿回同一张图")
 
-            # 5) 指代检测别误伤正常描述
-            check(tools._is_repeat_prompt("再生成一张"), "'再生成一张' 应判为指代")
-            check(tools._is_repeat_prompt("another one"), "'another one' 应判为指代")
-            check(not tools._is_repeat_prompt("一只橘猫坐在窗台上晒太阳"),
+            # 5) 指代解析：纯指代复用；带新对象必须用新描述
+            #    回归事故：用户「再生成一张小狗照片」，旧判定复用上一张猫的
+            #    prompt，结果出猫不出狗（截图 2026-11-08 23:43）。
+            last = "一只橘猫"
+            check(tools.resolve_image_prompt("再生成一张", last) == (last, True),
+                  "'再生成一张' 应复用上一张")
+            check(tools.resolve_image_prompt("再来一张", last) == (last, True),
+                  "'再来一张' 应复用上一张")
+            check(tools.resolve_image_prompt("another one", "a cat") == ("a cat", True),
+                  "英文纯指代应复用")
+            check(tools.resolve_image_prompt("再生成一张小狗照片", last) == ("小狗照片", False),
+                  "带新对象时必须用新描述，不能复用猫")
+            check(tools.resolve_image_prompt("再来一张布偶猫，水彩风", last)[0] == "布偶猫，水彩风",
+                  "带新对象的完整描述应保留")
+            check(tools.resolve_image_prompt("再生成一张，水彩风", last)
+                  == ("一只橘猫，水彩风", False),
+                  "逗号后是追加风格，应合并到上一张")
+            check(tools.resolve_image_prompt("一只橘猫坐在窗台上晒太阳", last)[1] is False,
                   "正常描述不应判成指代")
+            check(tools.resolve_image_prompt("再生成一张", None) == (None, True),
+                  "没有上一张时应提示模型补描述")
+
+            # 6) 端到端：上一张是猫，这次要狗，工具真的用狗的 prompt
+            tools._LAST_IMG_PROMPT = None
+            with patch("httpx.Client") as C:
+                client = C.return_value.__enter__.return_value
+                client.get.side_effect = [resp(200), resp(200)]
+                tools.generate_image("一只橘猫", 256, 256)
+                out_dog = tools.generate_image("再生成一张小狗照片", 256, 256)
+                check("提示词：小狗照片" in out_dog, "要狗就要用狗的 prompt")
+                check("一只橘猫" not in out_dog, "不能残留上一张猫的描述")
 
     print(f"\n{total - failed}/{total} 通过")
     return 1 if failed else 0

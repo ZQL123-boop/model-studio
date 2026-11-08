@@ -1023,6 +1023,18 @@ def agent_sessions(limit: int = 20):
             continue
     return {"count": len(out), "sessions": out}
 
+@app.post("/api/agent/clear")
+def clear_agent_state():
+    """前端「清空对话」时一并重置服务端的跨请求状态（目前是上一张图的描述）。
+
+    消息历史本来就在前端、每次请求自带，服务端无需保存；这里只清
+    generate_image 记住的上一张 prompt，否则新对话的「再生成一张」
+    会沿用清空前的图。
+    """
+    tools.reset_image_memory()
+    return {"ok": True}
+
+
 @app.post("/api/agent/stream")
 async def agent_stream(req: ChatReq, request: Request):
     """带文件工具的 agent。状态管理、计划注入、卡住检测都在 app/agent.py。

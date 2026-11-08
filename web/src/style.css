@@ -137,6 +137,23 @@ button.danger:hover:not(:disabled) { border-color: var(--red); }
 .msg.bot .bubble { background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.bot .bubble.failed { border-color: #5a2a2a; color: var(--red); }
 
+/* 对话栏的「清空对话」，二次确认时标红 */
+.clear-chat {
+  margin-left: 10px;
+  padding: 3px 9px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.clear-chat:hover { color: var(--text); border-color: var(--dim); }
+.clear-chat.confirm { color: var(--red); border-color: var(--red); }
+.clear-chat.confirm:hover { background: rgba(248, 81, 73, 0.12); }
+
 /* generate_image 的返回值：![alt](/generated/xxx.jpg) 渲染成真正的图片 */
 .bubble .md-img {
   display: block;

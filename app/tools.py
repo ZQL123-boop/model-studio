@@ -500,6 +500,15 @@ IMG_DIR = None          # 延迟到首次调用时定（依赖 WRITE_ROOT）
 # 本地 30B 把这句话原样塞进 prompt，拿去生了一张没有意义的图。
 _LAST_IMG_PROMPT: str | None = None
 
+
+def reset_image_memory() -> None:
+    """用户点「清空对话」时调用：忘掉上一张图的描述。
+
+    不清的话，新对话里说「再生成一张」仍会沿用清空前那只猫。
+    """
+    global _LAST_IMG_PROMPT
+    _LAST_IMG_PROMPT = None
+
 # Pollinations 按 IP 短时限流：实测连续第 2 次请求就 402，隔几秒自动恢复。
 # 这类是**临时**故障，必须在工具内部退避重试消化掉。把
 # 「[错误] HTTP 402」原样甩给模型，30B 会当成「工具真做不到」，
@@ -514,14 +523,41 @@ _IMG_ENDPOINTS = (
 )
 
 
-def _is_repeat_prompt(q: str) -> bool:
-    """「再生成一张」这类指代，不是图像描述。"""
-    s = (q or "").strip()
-    if not s or len(s) > 24:
-        return False
-    if re.search(r"another|one more|same|again|repeat", s, re.I):
-        return True
-    return bool(re.search(r"(再|又|重新|多).{0,4}(张|个|幅|图|次|来|生成|画)", s))
+# 元指令前缀：「再生成一张」「再来一张」「又生成」「another one」等。
+# 前缀后面**还有内容**时（「再生成一张小狗照片」→「小狗照片」），那是新的
+# 图像描述，绝不能复用上一张的 prompt —— 实测回归：用户要小狗，旧判定
+# 把整句当成纯指代，拿上一张猫的描述又出了一张猫。
+_REPEAT_LEAD = re.compile(
+    r"^(?:再|又|重新|另外|多)?\s*(?:来|生成|画|给|整|搞|换)\s*(?:一)?\s*(?:张|个|幅)?\s*"
+    r"|^(?:another|one\s+more|repeat|again)\s*(?:one|image|picture|photo)?\s*",
+    re.I,
+)
+_PURE_QUANTIFIER = re.compile(
+    r"^(?:同样|一样|相同|同款|原样)?(?:的)?(?:图|图片|照片|画像|画|张|个|幅)?$"
+)
+
+
+def resolve_image_prompt(prompt: str,
+                         last_prompt: str | None) -> tuple[str | None, bool]:
+    """把「再生成一张 XXX」解析成真正的图像描述。
+
+    返回 (最终 prompt, 是否纯指代复用上一张)；prompt=None 表示没有上一张
+    可复用、需要模型把要画的内容写进 prompt 再调一次。
+    """
+    s = (prompt or "").strip()
+    if not s:
+        return None, False
+    m = _REPEAT_LEAD.match(s)
+    if not m:
+        return s, False                        # 正常描述，原样用
+    tail = s[m.end():]
+    rest = tail.strip(" ，,。！？、")
+    if not rest or _PURE_QUANTIFIER.fullmatch(rest):
+        return (last_prompt, True) if last_prompt else (None, True)
+    if tail[:1] in ("，", ",", "、") and last_prompt:
+        # 「再生成一张，水彩风」是给上一张换风格，不是换对象
+        return f"{last_prompt}，{rest}", False
+    return rest, False                         # 有新的描述，别复用旧的
 
 
 def generate_image(prompt: str, width: int = 512, height: int = 512) -> str:
@@ -537,15 +573,12 @@ def generate_image(prompt: str, width: int = 512, height: int = 512) -> str:
 
     global _LAST_IMG_PROMPT
 
-    q = (prompt or "").strip()
-    if not q:
+    if not (prompt or "").strip():
         return "[错误] prompt 不能为空"
-    repeat = _is_repeat_prompt(q)
-    if repeat:
-        if not _LAST_IMG_PROMPT:
-            return ("[提示] 我这边没有上一张图的描述。请把要画的内容写进 prompt "
-                    "再调用一次 generate_image（例如「一只橘猫」）。")
-        q = _LAST_IMG_PROMPT          # 沿用上一张的描述，别拿「再生成一张」当 prompt
+    q, repeat = resolve_image_prompt(prompt, _LAST_IMG_PROMPT)
+    if q is None:
+        return ("[提示] 我这边没有上一张图的描述。请把要画的内容写进 prompt "
+                "再调用一次 generate_image（例如「一只橘猫」）。")
 
     w = max(256, min(int(width or 512), 1024))
     h = max(256, min(int(height or 512), 1024))

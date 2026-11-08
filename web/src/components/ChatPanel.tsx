@@ -3,7 +3,7 @@ import {
   type Dispatch, type SetStateAction, type ReactNode,
 } from "react";
 import { streamSSE } from "../api";
-import { isLocalHost } from "../auth";
+import { getToken, isLocalHost } from "../auth";
 import type { ChatMsg, GenSettings, Provider, TraceItem } from "../types";
 
 function isAbortError(e: unknown): boolean {
@@ -65,6 +65,8 @@ export default function ChatPanel({
   const isLocal = isLocalHost();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // 清空对话要二次确认，避免手滑把整段对话弄没了
+  const [confirmClear, setConfirmClear] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   // 每次发送新建 controller；复用已 abort 的那个会让下一次请求刚发出就被取消
   const ctrlRef = useRef<AbortController | null>(null);
@@ -187,12 +189,49 @@ export default function ChatPanel({
     ctrlRef.current?.abort();
   }
 
+  // 确认态 4 秒后自动收回，别让按钮一直停在「确认清空？」
+  useEffect(() => {
+    if (!confirmClear) return;
+    const t = window.setTimeout(() => setConfirmClear(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [confirmClear]);
+
+  function clearChat() {
+    if (busy) {
+      onToast("先停止当前回答再清空", true);
+      return;
+    }
+    if (!confirmClear) {
+      setConfirmClear(true);
+      return;
+    }
+    setMsgs([]);
+    // App 的 useEffect 会写回 []，这里显式删一次更干净（隐私模式可能抛错）
+    try { sessionStorage.removeItem("ms_chat_msgs"); } catch { /* 忽略 */ }
+    setInput("");
+    setConfirmClear(false);
+    // 顺带重置服务端的「上一张图描述」；失败不影响前端已清空
+    const t = getToken();
+    void fetch("/api/agent/clear", {
+      method: "POST",
+      headers: t ? { Authorization: `Bearer ${t}` } : undefined,
+    }).catch(() => { /* 静默：前端清空已经生效 */ });
+    onToast("对话已清空");
+  }
+
   return (
     <>
       <div className="col-head">
         对话
         <span className="spacer" />
         <span>{useAgent ? "agent · 20 工具" : "普通聊天 · 5 工具"}</span>
+        <button
+          className={`clear-chat${confirmClear ? " confirm" : ""}`}
+          onClick={clearChat}
+          title="清空当前对话（不可撤销）"
+        >
+          {confirmClear ? "确认清空？" : "清空对话"}
+        </button>
       </div>
 
       <div className="msgs" ref={listRef}>
