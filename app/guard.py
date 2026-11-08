@@ -96,7 +96,31 @@ def wants_image(goal: str) -> bool:
     return bool(_IMAGE_HINT.search(goal or ""))
 
 
-def guard_tool(goal: str, name: str, args: dict) -> str | None:
+# ---------------------------------------------------------------- 持久化写入护栏
+# 评测 C7：list_goals 返回「还没有目标」→ 模型凭空造 4 条写进主人的
+# goals.json → 汇报「您当前有 4 个目标」。工具说没有，模型编一个再写回去，
+# 下次读回来就成了「事实」，用户没有任何回滚手段。
+_EMPTY_RESULT_MARKERS = ("还没有", "没有目标", "为空", "暂无", "0 条", "没有找到", "无结果")
+
+
+def _bigrams(s: str) -> set[str]:
+    # \W 在 Unicode 下保留中文，只去掉标点/空白
+    t = _re.sub(r"\W+", "", s or "")
+    return {t[i:i + 2] for i in range(len(t) - 1)} or ({t} if t else set())
+
+
+def grounded_in_user(text: str, user_text: str) -> bool:
+    """要持久化的文本是否出自用户原话（字级 2-gram 覆盖率 >= 0.6）。
+
+    中文没有天然分词，字级 bigram 比「词重合」稳。宁可误拦一次转述，
+    也不能让模型凭空造数据写库——写错了用户自己发现不了。
+    """
+    a, b = _bigrams(text), _bigrams(user_text)
+    return bool(a) and len(a & b) / len(a) >= 0.6
+
+
+def guard_tool(goal: str, name: str, args: dict,
+               last_result: str | None = None) -> str | None:
     """拦"用户没要、模型自己加戏"的工具调用。返回 None 表示放行。
 
     实测事故：用户要"ACM 的 C 语言算法题清单"，模型画了一张"ACM 参赛资格"
@@ -123,4 +147,18 @@ def guard_tool(goal: str, name: str, args: dict) -> str | None:
             # 连原本的文字任务都不做。必须给明确的下一步指令。
             return ("[拦截] 用户要的是文字结果，不是图片。不要调用 generate_image，"
                     "也不要解释这次拦截或向用户道歉——直接按要求用文字回答。")
+
+    # set_goal 会改主人 Mac 上的持久状态，只允许记录用户明确说过的话。
+    # done=True 是「标记已有目标完成」，不算新增，不校验。
+    if name == "set_goal" and not (args or {}).get("done"):
+        text = str((args or {}).get("goal") or "").strip()
+        lr = last_result or ""
+        if any(mk in lr for mk in _EMPTY_RESULT_MARKERS):
+            return ("[拦截] 上一个工具明确返回「没有数据」。不要凭空编造内容写进目标库，"
+                    "更不要把编出来的内容当成用户已有的目标汇报。\n"
+                    "直接如实回答「当前还没有目标」；只有用户明确要求新增时才调 set_goal。")
+        if not text or not grounded_in_user(text, goal):
+            return ("[拦截] 这条目标不是用户说的。set_goal 只能记录用户原话里明确给出的"
+                    "目标，不能自己补写、扩写或推测。\n"
+                    "如实回答查询结果即可；用户说「记住/添加目标：XXX」时再用原文记录。")
     return None

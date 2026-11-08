@@ -75,6 +75,14 @@ async def guard_remote(request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
 
+    # 访客工具白名单：在**任何**工具执行前设好请求级上下文，覆盖
+    # /api/agent/stream、/api/chat/stream、/v1/chat/completions 等所有
+    # 会调 tools.call 的路径。ContextVar 由中间件 task 复制到路由 task。
+    host = request.client.host if request.client else ""
+    forwarded = (request.headers.get("x-forwarded-for") or "").strip()
+    _is_visitor = not (host in LOCAL_HOSTS and not forwarded)
+    tools.set_visitor_allowed(REMOTE_TOOLS if _is_visitor else None)
+
     path = request.url.path
     # 这些接口放行（返回的只是布尔状态，不敏感）：
     # 登录层/锁按钮/公网按钮要在填 token 之前就能查到状态。
@@ -91,12 +99,10 @@ async def guard_remote(request, call_next):
     if path.startswith("/v1"):
         return await call_next(request)          # gateway 内部自己校验
 
-    host = request.client.host if request.client else ""
     # funnel/serve 会把公网请求代理到 127.0.0.1，单看 host 会误判成本机，
     # 导致公网访问也免 token。转发来的请求带 X-Forwarded-For，据此区分：
     #   - 真本机（浏览器直连 127.0.0.1，无 XFF）→ 免 token
     #   - funnel 转发（host=127.0.0.1 但带 XFF）→ 照常要求 token
-    forwarded = (request.headers.get("x-forwarded-for") or "").strip()
     if host in LOCAL_HOSTS and not forwarded:
         return await call_next(request)          # 真本机免 token
 
@@ -1053,6 +1059,9 @@ async def agent_stream(req: ChatReq, request: Request):
         globals()["_garbage_retry"] = 0
         globals()["_refusal_retry"] = 0
         _visitor = not _is_local_request(request)
+        # 白名单不只在 schema 层：执行前也得拦。模型看不见某个工具，
+        # 不代表它不会生成这个 tool call（评测里 set_goal 就是这么写进库的）。
+        tools.set_visitor_allowed(REMOTE_TOOLS if _visitor else None)
         parts = [persona.as_system(with_tools=True, visitor=_visitor)]
         if _visitor:
             # 远程访客写文件会被重定向到沙箱 + 转成下载链接，
@@ -1530,11 +1539,21 @@ async def agent_stream(req: ChatReq, request: Request):
                             result, stuck = _pre_result, state.push(name, args)
                             _ms = _pre_ms
                         else:
-                            _blocked = guard.guard_tool(state.goal, name, args)
-                            if _blocked:
-                                result, stuck = _blocked, state.push(name, args)
+                            if _visitor and name not in REMOTE_TOOLS:
+                                # 派发处硬拦：schema 过滤只保证「看不见」，
+                                # 这里保证「调不动」。tools.call 里还有一层兜底。
+                                result = (f"[拒绝] 工具 {name} 对远程访客不可用"
+                                          "（只读白名单）。不要重试这个工具。")
+                                stuck = state.push(name, args)
                             else:
-                                result, stuck = agent.execute(state, name, args, tools)
+                                _lr = (state.log[-1].get("preview", "")
+                                       if state.log else "")
+                                _blocked = guard.guard_tool(state.goal, name, args,
+                                                            last_result=_lr)
+                                if _blocked:
+                                    result, stuck = _blocked, state.push(name, args)
+                                else:
+                                    result, stuck = agent.execute(state, name, args, tools)
                             _ms = int((time.time() - _t_tool) * 1000)
 
                         if name == "write_plan":

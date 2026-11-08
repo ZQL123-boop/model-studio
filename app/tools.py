@@ -21,6 +21,7 @@
 """
 from __future__ import annotations
 
+import contextvars
 import fnmatch
 import json
 import os
@@ -654,6 +655,17 @@ def knowledge_search(query: str, top_k: int = 5) -> str:
                    f"（相似度 {ch.get('score', 0)}）")
         body = (ch.get("body") or "").strip().replace("\n", " ")
         out.append(f"   {body[:400]}")
+    # 评测 T9：top1 相似度只有 0.1538（命中 Bellman-Ford 段落），模型仍
+    # 直接按先验答了一半就收尾，漏答时间复杂度。弱命中必须显式推它换路。
+    try:
+        top = float(chunks[0].get("score", 0) or 0)
+    except (TypeError, ValueError):
+        top = 0.0
+    if 0 < top < 0.35:
+        out.append(f"\n[弱命中] 最高相似度只有 {top:.4f}，这些段落很可能答非所问。")
+        out.append("不要直接据此作答：换 2~3 组更短的关键词再调 knowledge_search，"
+                   "或改用 web_search 查；仍拿不到就如实说不确定，"
+                   "**不要用先验知识把答案补齐**。")
     return "\n".join(out)
 
 
@@ -2019,6 +2031,8 @@ TOOLS = [
             "description": (
                 "读文件内容。大文件用 start/end 只读需要的行段——"
                 "先用 read_files 看结构定位，再读具体范围。"
+                "**总结/概括/找函数这类任务至少读 80 行或读到函数定义**，"
+                "不要只给 max_lines=1 就下结论（只看 docstring 会漏掉函数体）。"
             ),
             "parameters": {
                 "type": "object",
@@ -2401,7 +2415,10 @@ _VERBOSE_PARAMS = {"spec", "steps", "tasks", "query", "action", "command", "cont
 
 # 这几个工具靠描述里的"取值清单"才能正确调用（office 的 action 有哪些、
 # design 的 check/shot），截太狠会变成乱试。给它们多留一点。
-_KEEP_FULL_DESC = {"office", "design", "make_chart", "spawn_agents"}
+# read_file：评测 T7 里模型给 max_lines=1 只看了 docstring 就总结。
+# compact 后描述只剩「读文件内容」5 个字，追加的「总结类至少读 80 行」
+# 会被截掉，所以这个工具保留完整描述（多几十字，对 8k 上下文可忽略）。
+_KEEP_FULL_DESC = {"office", "design", "make_chart", "spawn_agents", "read_file"}
 
 
 def _compact_schemas(items: list[dict]) -> list[dict]:
@@ -2445,8 +2462,25 @@ _HANDLERS = {
 }
 
 
+# 远程访客白名单。只在 schema 层过滤工具是不够的：模型照样能生成
+# 白名单外的 tool call，服务端照跑（评测 T10/C7：set_goal 写进了主人的
+# 目标库）。这里在**执行前**再兜一层，覆盖所有调用 tools.call 的路径，
+# 包括 main.py 里 asyncio.to_thread 的并行只读分支。
+# ContextVar 按请求 task 隔离；to_thread 会 copy_context，所以并行分支同样生效。
+_VISITOR_ALLOWED: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar(
+    "ms_visitor_allowed", default=None)
+
+
+def set_visitor_allowed(names: set[str] | None) -> None:
+    """本次请求限定可用工具；None = 本机请求，不限制。"""
+    _VISITOR_ALLOWED.set(frozenset(names) if names is not None else None)
+
+
 def call(name: str, args: dict) -> str:
     """执行工具。异常一律转成字符串返回给模型，不让它中断整个流程。"""
+    allowed = _VISITOR_ALLOWED.get()
+    if allowed is not None and name not in allowed:
+        return f"[拒绝] 工具 {name} 对远程访客不可用（只读白名单）"
     fn = _HANDLERS.get(name)
     if not fn:
         return f"[错误] 没有这个工具：{name}"

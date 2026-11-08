@@ -245,10 +245,17 @@ def execute(state: AgentState, name: str, args: dict, tools_mod) -> tuple[str, b
             result += ("\n\n⛔ 又是同一个调用。按当前方式做不下去，已经停下。")
 
     # 失败计数：工具返回 [错误]/[拒绝]/[超时] 都算。
-    # 连续两次失败就明确要求换方法——30B 会反复用同一个错参数重试。
+    # 原来要连续失败 2 次才给推力，评测 T11 里 read_file 报「文件不存在」
+    # 后模型直接收尾「请确认路径」，一次都没换方法。改成首次失败就推。
     failed = result.lstrip().startswith(("[错误]", "[拒绝]", "[超时]"))
     state.fails = state.fails + 1 if failed else 0
-    if state.fails >= 2:
+    if state.fails == 1:
+        result += ("\n\n⚠️ 这一步失败了。**先换方法再试一次**，不要直接收尾：\n"
+                   "- 文件不存在 → 用 find_files(\"文件名*\") 或 list_dir(所在目录) 找真实路径；\n"
+                   "- 搜索没结果 → 换 2~3 组更短的关键词再搜，或换 fetch_url / web_search；\n"
+                   "- 参数报错 → 按工具说明改参数。\n"
+                   "只有换过方法仍失败，才可以把问题交回用户，并说清卡在哪一步。")
+    elif state.fails >= 2:
         result += (f"\n\n⚠️ 已经连续失败 {state.fails} 次。"
                    "**换方法再试**：换更短更具体的查询词、换工具（web_search ↔ fetch_url）、"
                    "换路径。**不要重复同样的调用，也不要把问题原样推回给用户**。"
@@ -489,8 +496,9 @@ async def run_task(goal: str, system_base: str, tools_mod, *,
             except (ValueError, TypeError):
                 args = {}
             used = {r.get("tool") for r in state.log}
+            last_res = state.log[-1].get("preview", "") if state.log else ""
             blocked = guard.guard_write(state.goal, name, args, used) or guard.guard_tool(
-                state.goal, name, args)
+                state.goal, name, args, last_result=last_res)
             if blocked:
                 result = blocked
             else:
