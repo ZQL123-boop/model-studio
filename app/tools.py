@@ -495,48 +495,108 @@ def get_weather(city: str) -> str:
 # ---------------------------------------------------------------- 图像生成
 IMG_DIR = None          # 延迟到首次调用时定（依赖 WRITE_ROOT）
 
+# 「再生成一张」的记忆。实测存档 002f5502：用户说「再生成一张」，
+# 本地 30B 把这句话原样塞进 prompt，拿去生了一张没有意义的图。
+_LAST_IMG_PROMPT: str | None = None
+
+# Pollinations 按 IP 短时限流：实测连续第 2 次请求就 402，隔几秒自动恢复。
+# 这类是**临时**故障，必须在工具内部退避重试消化掉。把
+# 「[错误] HTTP 402」原样甩给模型，30B 会当成「工具真做不到」，
+# 转头去 web_search / fetch_url 找图，最后编一句「服务暂时不可用」
+# （存档 002f5502：9 轮 / 158.9s，一张图没出）。
+_IMG_RETRY_STATUS = {402, 408, 425, 429, 500, 502, 503, 504}
+_IMG_BACKOFF = (3, 6, 12)         # 3 次退避 → 最多 4 次尝试，覆盖 ~21s 抖动
+_IMG_TIMEOUT = 45                 # 单次请求超时（实测出图 1~8s）
+_IMG_ENDPOINTS = (
+    "https://image.pollinations.ai/prompt/{q}",
+    "https://pollinations.ai/p/{q}",          # 备用入口，主节点抽风时换
+)
+
+
+def _is_repeat_prompt(q: str) -> bool:
+    """「再生成一张」这类指代，不是图像描述。"""
+    s = (q or "").strip()
+    if not s or len(s) > 24:
+        return False
+    if re.search(r"another|one more|same|again|repeat", s, re.I):
+        return True
+    return bool(re.search(r"(再|又|重新|多).{0,4}(张|个|幅|图|次|来|生成|画)", s))
+
 
 def generate_image(prompt: str, width: int = 512, height: int = 512) -> str:
     """用在线服务（Pollinations，免费无需 key）生成图像，存到 sandbox/generated/。
 
     为什么用在线而不是本地 MLX：本地 SD 模型要 4~6 GB，24 GB 内存跑完 30B 就没空间了。
-    在线 1.5 秒出图，代价是要联网。
+    在线 1~8 秒出图，代价是要联网 + 会被短时限流（已在工具内部退避重试）。
     """
-    import time as _t
+    import random as _rand
     from urllib.parse import quote
 
     import httpx
 
+    global _LAST_IMG_PROMPT
+
     q = (prompt or "").strip()
     if not q:
         return "[错误] prompt 不能为空"
+    repeat = _is_repeat_prompt(q)
+    if repeat:
+        if not _LAST_IMG_PROMPT:
+            return ("[提示] 我这边没有上一张图的描述。请把要画的内容写进 prompt "
+                    "再调用一次 generate_image（例如「一只橘猫」）。")
+        q = _LAST_IMG_PROMPT          # 沿用上一张的描述，别拿「再生成一张」当 prompt
+
     w = max(256, min(int(width or 512), 1024))
     h = max(256, min(int(height or 512), 1024))
-
     out_dir = WRITE_ROOT / "generated"
     out_dir.mkdir(parents=True, exist_ok=True)
-    fn = out_dir / f"img_{int(_t.time())}.jpg"
 
-    try:
-        with httpx.Client(trust_env=False, timeout=120, follow_redirects=True) as c:
-            r = c.get(f"https://image.pollinations.ai/prompt/{quote(q)}",
-                      params={"width": w, "height": h, "nologo": "true"})
-    except Exception as e:                                # noqa: BLE001
-        return f"[错误] 生成失败：{type(e).__name__}: {e}"
+    params = {"width": w, "height": h, "nologo": "true"}
 
-    if r.status_code != 200:
-        return f"[错误] 图像服务返回 HTTP {r.status_code}"
-    if len(r.content) < 5000:
-        return "[错误] 返回内容太小，可能不是图片"
+    last_err = ""
+    for attempt in range(len(_IMG_BACKOFF) + 1):
+        if attempt:
+            time.sleep(_IMG_BACKOFF[attempt - 1])
+        # 每次换 seed：既避开「坏节点 + 旧缓存」，也保证「再生成一张」
+        # 不会因为 prompt 相同又拿回上一张图。
+        prm = {**params, "seed": _rand.randint(1, 2_000_000_000)}
+        # 前两次打主入口，第 3 次起切备用入口
+        api = _IMG_ENDPOINTS[0 if attempt < 2 else 1].format(q=quote(q))
+        try:
+            with httpx.Client(trust_env=False, timeout=_IMG_TIMEOUT,
+                              follow_redirects=True) as c:
+                r = c.get(api, params=prm)
+        except Exception as e:                            # noqa: BLE001
+            last_err = f"{type(e).__name__}: {e}"
+            continue
+        if r.status_code == 200 and len(r.content) >= 5000:
+            # 毫秒级文件名：连续两次生成（「再生成一张」）不会互相覆盖
+            fn = out_dir / f"img_{int(time.time() * 1000)}.jpg"
+            fn.write_bytes(r.content)
+            _LAST_IMG_PROMPT = q
+            # 返回可访问的 URL（/generated/xxx.jpg，由 main.py 的静态路由提供），
+            # 不是本地绝对路径——前端用不了绝对路径。
+            url = f"/generated/{fn.name}"
+            return (f"[已生成] {url}\n"
+                    f"尺寸 {w}x{h}，{len(r.content) // 1024} KB\n"
+                    f"提示词：{q}\n"
+                    f"**回答里直接用这行展示图片**（前端会渲染）：\n![{q}]({url})")
+        if r.status_code == 200:
+            last_err = "HTTP 200 但返回内容太小"
+            continue
+        if r.status_code not in _IMG_RETRY_STATUS:
+            return f"[错误] 图像服务返回 HTTP {r.status_code}（非临时故障，不重试）"
+        last_err = f"HTTP {r.status_code}"
 
-    fn.write_bytes(r.content)
-    # 返回可访问的 URL（/generated/xxx.jpg，由 main.py 的静态路由提供），
-    # 不是本地绝对路径——前端用不了绝对路径。
-    url = f"/generated/{fn.name}"
-    return (f"[已生成] {url}\n"
-            f"尺寸 {w}x{h}，{len(r.content) // 1024} KB\n"
-            f"提示词：{q}\n"
-            f"**回答里直接用这行展示图片**（前端会渲染）：\n![{q}]({url})")
+    # 重试耗尽：明确告诉模型这是限流、别换工具、别编结论。
+    # 只说「服务不可用」会被复述成最终答案，并触发 persona 里「找信息→联网」的链路。
+    return ("[临时故障] 图像服务被短时限流，已自动退避重试 4 次仍失败"
+            f"（最后一次：{last_err}）。\n"
+            "这是**临时限流**，不是任务失败，也不是你调错了工具：\n"
+            "1. 不要改用 web_search / fetch_url —— 它们拿不到图片文件；\n"
+            "2. 不要向用户编造结果或说「服务永久不可用」；\n"
+            "3. 直接**再调用一次 generate_image**（同样参数）重试，或如实告诉用户"
+            "「图片服务暂时被限流，等几秒再让我生成一次」。")
 
 
 # ---------------------------------------------------------------- 知识库
