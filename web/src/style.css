@@ -137,6 +137,17 @@ button.danger:hover:not(:disabled) { border-color: var(--red); }
 .msg.bot .bubble { background: var(--panel); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .msg.bot .bubble.failed { border-color: #5a2a2a; color: var(--red); }
 
+/* generate_image 的返回值：![alt](/generated/xxx.jpg) 渲染成真正的图片 */
+.bubble .md-img {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  margin: 6px 0 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
 .msg-meta {
   display: flex;
   gap: 10px;

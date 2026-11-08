@@ -1,10 +1,43 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect, useRef, useState,
+  type Dispatch, type SetStateAction, type ReactNode,
+} from "react";
 import { streamSSE } from "../api";
 import { isLocalHost } from "../auth";
 import type { ChatMsg, GenSettings, Provider, TraceItem } from "../types";
 
 function isAbortError(e: unknown): boolean {
   return e instanceof Error && e.name === "AbortError";
+}
+
+// generate_image 返回的是 Markdown 图片语法：![描述](/generated/xxx.jpg)。
+// 气泡原来直接把 content 当纯文本塞进去，这行会原样显示成字符串。
+// 只解析图片这一种语法，不做全量 Markdown：不用引依赖，也不扩大 XSS 面。
+// URL 只放行同源静态路径和 http(s)，模型塞 javascript: / data: 一律不渲染。
+const MD_IMG = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+function safeImgSrc(u: string): string | null {
+  const s = u.trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^\/(generated|shots|static|assets)\//.test(s)) return s;
+  return null;
+}
+
+function MessageBody({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  MD_IMG.lastIndex = 0;            // 带 g 的正则要重置，否则多次渲染会串位
+  let m: RegExpExecArray | null;
+  while ((m = MD_IMG.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const src = safeImgSrc(m[2]);
+    parts.push(src
+      ? <img key={m.index} className="md-img" src={src} alt={m[1] || "生成的图片"} />
+      : m[0]);                    // 不安全 URL 保留原文，别静默吞掉
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 interface Props {
@@ -186,7 +219,9 @@ export default function ChatPanel({
               </div>
             )}
             <div className={`bubble${m.failed ? " failed" : ""}`}>
-              {m.content || (busy && i === msgs.length - 1 ? "…" : "")}
+              {m.content
+                ? <MessageBody text={m.content} />
+                : (busy && i === msgs.length - 1 ? "…" : "")}
             </div>
             {m.role === "assistant" && m.elapsed != null && (
               <div className="msg-meta">
