@@ -116,6 +116,7 @@ export default function ChatPanel({
 
     let acc = "";
     let route: ChatMsg["route"] = null;
+    let gotDone = false;
     const steps: string[] = [];
 
     const paint = (patch: Partial<ChatMsg>) => {
@@ -149,6 +150,7 @@ export default function ChatPanel({
         if (f.t) acc += f.t;
         if (f.answer) acc = f.answer; // agent 末帧是完整答案，覆盖增量
         if (f.done) {
+          gotDone = true;
           // agent 生成的文件在 sandbox/generated 下，转成下载链接：
           // 远程访客点一下，文件落到他自己的设备（浏览器不能直写磁盘）
           const downloads = (f.changed || [])
@@ -167,9 +169,22 @@ export default function ChatPanel({
         paint({ content: acc, route, steps: [...steps] });
         scrollBottom();
       }
-      // 用户取消时保留已写出的字，不要换成「没有输出」
-      if (ctrl.signal.aborted) return;
-      if (!acc.trim()) {
+      // 用户取消时保留已写出的字，不要换成「没有输出」；
+      // 但一个字都还没写出来时别留个空白气泡，看着像卡死
+      if (ctrl.signal.aborted) {
+        if (!acc.trim()) paint({ content: "（已停止）", failed: true });
+        return;
+      }
+      // 流被服务端/网络提前掐断时不会发 done 帧。原来这种情况气泡就一直
+      // 停在空白，用户分不清「还在跑」和「已经死了」，只能干等。
+      if (!gotDone) {
+        paint({
+          content: acc.trim()
+            ? acc + "\n\n（连接提前结束，回答可能不完整，可以直接重发）"
+            : "（连接提前结束，没收到完整回答：可能网络抖动、服务重启或请求超时。直接重发一次即可）",
+          failed: true,
+        });
+      } else if (!acc.trim()) {
         paint({ content: "（模型没有输出内容，重发试试）", failed: true });
       }
     } catch (e) {
