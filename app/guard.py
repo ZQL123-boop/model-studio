@@ -68,10 +68,31 @@ import re as _re
 
 _DIGITS = _re.compile(r"\d")
 
+# 用户「要一张图」的意图。中文里动作和名词之间常插量词/修饰语：
+#   "生成一张猫咪的照片"、"给我一张猫图"
+# 旧版用连续子串白名单（"生成图"）匹配不到这种结构，把真要图的请求判成
+# 「没要求图片」→ 工具被拦 → 本地 30B 收到拦截语后道歉并放弃整个任务。
+_IMAGE_HINT = _re.compile(
+    r"画|绘|"
+    r"照片|图片|图像|插画|海报|配图|壁纸|头像|封面|表情包|"
+    r"(?:生成|做|弄|来|给|出|要|整|搞|换)[^，。！？\n]{0,8}[图画像片照]|"
+    r"[张幅][^，。！？\n]{0,8}[图画像片照]"
+)
+
+# 明确的纯文本任务：只有这些才拦「模型自己加戏生图」。
+_TEXT_ONLY_TASK = (
+    "清单", "整理", "汇总", "列表", "列一下", "列出来", "总结", "表格",
+    "写成", "写一段", "翻译", "解释", "说明", "写代码", "脚本",
+)
+
 
 def wants_chart(goal: str) -> bool:
     g = goal or ""
     return any(w in g for w in CHART_WORDS)
+
+
+def wants_image(goal: str) -> bool:
+    return bool(_IMAGE_HINT.search(goal or ""))
 
 
 def guard_tool(goal: str, name: str, args: dict) -> str | None:
@@ -79,6 +100,10 @@ def guard_tool(goal: str, name: str, args: dict) -> str | None:
 
     实测事故：用户要"ACM 的 C 语言算法题清单"，模型画了一张"ACM 参赛资格"
     的柱状图，连着失败 3 次还在试——用户要的压根不是图。
+
+    代价是不对称的：误杀（用户要图却被拦，只收到一句道歉、任务彻底失败）
+    远严重于漏放（模型多跑 1 秒生图）。所以「拿不准」一律放行，只有明确
+    是纯文本任务才拦。
     """
     if name == "make_chart":
         if not wants_chart(goal):
@@ -89,6 +114,12 @@ def guard_tool(goal: str, name: str, args: dict) -> str | None:
             return ("[拦截] make_chart 需要数值数据（x 轴 + 一列数字），你给的是文字，"
                     "画不出来。整理类任务请直接用表格回答。")
     if name == "generate_image":
-        if not any(w in (goal or "") for w in ("画", "生成图", "来张", "插画", "海报", "配图")):
-            return "[拦截] 用户没有要求生成图片。"
+        g = goal or ""
+        if wants_image(g):
+            return None
+        if any(w in g for w in _TEXT_ONLY_TASK) or not g.strip():
+            # 别只说「用户没要求图片」：本地 30B 会据此道歉然后直接结束，
+            # 连原本的文字任务都不做。必须给明确的下一步指令。
+            return ("[拦截] 用户要的是文字结果，不是图片。不要调用 generate_image，"
+                    "也不要解释这次拦截或向用户道歉——直接按要求用文字回答。")
     return None
