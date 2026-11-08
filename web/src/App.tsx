@@ -100,8 +100,16 @@ export default function App() {
     }
     return [];
   });
-  // 工具调用追踪（trace 面板用）
-  const [traces, setTraces] = useState<TraceItem[]>([]);
+  // 工具调用追踪（trace 面板用）。刷新页面也要在，否则强刷一次就全空了。
+  const [traces, setTraces] = useState<TraceItem[]>(() => {
+    try {
+      const raw = sessionStorage.getItem("ms_traces");
+      if (raw) return JSON.parse(raw) as TraceItem[];
+    } catch {
+      /* 坏数据当没有 */
+    }
+    return [];
+  });
 
   // loadModels 里要判断"是否已选"，用 ref 避免把它塞进依赖导致重复拉取
   const selectedRef = useRef<LocalModel | null>(null);
@@ -141,6 +149,15 @@ export default function App() {
       /* 超限或隐私模式，放弃持久化，不影响使用 */
     }
   }, [chatMsgs]);
+
+  // 追踪同样落盘，只留最近 200 条（preview 可能很长，别撑爆 5MB）
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("ms_traces", JSON.stringify(traces.slice(-200)));
+    } catch {
+      /* 超限或隐私模式 */
+    }
+  }, [traces]);
 
   const toast = useCallback((msg: string, err = false) => {
     const id = Date.now() + Math.random();
@@ -389,7 +406,10 @@ export default function App() {
             ))}
           </div>
 
-          {tab === "chat" && (
+          {/* ChatPanel 常驻，用 CSS 隐藏而不是条件卸载：
+              卸载会 abort 正在跑的 SSE 流，用户一切到「追踪」页看进度，
+              请求就被掐断、step 帧发不出来，追踪页永远空白。 */}
+          <div className={`chat-pane${tab === "chat" ? "" : " hidden"}`}>
             <ChatPanel
               ready={status?.state === "ready"}
               providers={providers}
@@ -403,7 +423,7 @@ export default function App() {
               setMsgs={setChatMsgs}
               onTrace={(t) => setTraces((prev) => [...prev, t])}
             />
-          )}
+          </div>
           {tab === "compare" && (
             <ComparePanel providers={providers} settings={settings} onToast={toast} />
           )}

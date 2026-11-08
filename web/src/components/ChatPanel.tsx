@@ -73,7 +73,9 @@ export default function ChatPanel({
   const reqRef = useRef(0);
 
   useEffect(() => {
-    // 对话 tab 卸掉时组件会卸载，生成中的流不能留在后台继续跑
+    // 只在整个 App 卸载（关页面）时掐断流。App 现在用 CSS 隐藏 chat-pane，
+    // 切 tab 不会卸载本组件——否则用户切到「追踪」页看进度时请求会被
+    // abort，step 帧发不出来，追踪页空白、对话也断在半截。
     return () => {
       ctrlRef.current?.abort();
     };

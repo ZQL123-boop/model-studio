@@ -98,6 +98,11 @@ button.danger:hover:not(:disabled) { border-color: var(--red); }
 .col-head .spacer { flex: 1; }
 .scroll { flex: 1; overflow-y: auto; min-height: 0; }
 
+/* 对话面板常驻，切 tab 只隐藏不卸载：否则会 abort 正在跑的 SSE 流，
+   追踪页收不到 step 帧、对话也会断在半截。 */
+.chat-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.chat-pane.hidden { display: none; }
+
 /* ---------------------------------------------------------------- 模型列表 */
 .model {
   margin: 8px 10px;
