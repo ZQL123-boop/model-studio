@@ -270,16 +270,6 @@ button.danger:hover:not(:disabled) { border-color: var(--red); }
 }
 .trace-detail pre:last-child { margin-bottom: 0; }
 
-.routechip {
-  font-size: 11px;
-  color: var(--dim);
-  margin-bottom: 5px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.routechip b { color: var(--accent); font-weight: 600; }
-
 .steps { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
 .step-tag {
   font-size: 11px;

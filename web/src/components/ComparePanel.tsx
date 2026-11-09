@@ -158,7 +158,6 @@ function SidePane({
         <span>{title}</span>
         <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
           <option value="">本地模型</option>
-          <option value="auto">自动选型</option>
           {providers.filter((p) => p.has_key).map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}

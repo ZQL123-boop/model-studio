@@ -47,7 +47,6 @@ export interface ModelsResp {
 export interface ChatMsg {
   role: "user" | "assistant";
   content: string;
-  route?: { label: string; reason: string } | null;
   steps?: string[];
   failed?: boolean;
   ttft?: number;      // 首 token 延迟（秒）
@@ -58,7 +57,6 @@ export interface ChatMsg {
 export interface StreamFrame {
   t?: string;
   r?: string;
-  route?: { provider: string; label: string; reason: string; remote: boolean };
   done?: boolean;
   error?: string;
   answer?: string;

@@ -74,7 +74,7 @@ export default function App() {
   const [models, setModels] = useState<LocalModel[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [selected, setSelected] = useState<LocalModel | null>(null);
-  const [provider, setProvider] = useState("auto");
+  const [provider, setProvider] = useState("");
   const [useAgent, setUseAgent] = useState(true);
   const [busy, setBusy] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);

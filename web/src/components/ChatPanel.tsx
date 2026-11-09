@@ -117,7 +117,6 @@ export default function ChatPanel({
     ctrlRef.current = ctrl;
 
     let acc = "";
-    let route: ChatMsg["route"] = null;
     let gotDone = false;
     const steps: string[] = [];
 
@@ -135,7 +134,6 @@ export default function ChatPanel({
       for await (const f of streamSSE(path, body, ctrl.signal)) {
         if (ctrl.signal.aborted) break;
         if (f.error) throw new Error(f.error);
-        if (f.route) route = { label: f.route.label, reason: f.route.reason };
         if (f.step_start?.tool) steps.push(f.step_start.tool);
         if (f.step?.tool) {
           const pv = f.step.preview || "";
@@ -162,13 +160,13 @@ export default function ChatPanel({
               return { name: rel.split("/").pop() || rel, url: `/generated/${rel}` };
             });
           paint({
-            content: acc, route, steps: [...steps],
+            content: acc, steps: [...steps],
             ttft: f.ttft_s, elapsed: f.elapsed_s, downloads,
           });
           scrollBottom();
           continue;
         }
-        paint({ content: acc, route, steps: [...steps] });
+        paint({ content: acc, steps: [...steps] });
         scrollBottom();
       }
       // 用户取消时保留已写出的字，不要换成「没有输出」；
@@ -261,12 +259,6 @@ export default function ChatPanel({
         )}
         {msgs.map((m, i) => (
           <div key={i} className={`msg ${m.role === "user" ? "user" : "bot"}`}>
-            {m.role === "assistant" && m.route && (
-              <div className="routechip">
-                🧭 自动选型：<b>{m.route.label}</b>
-                {m.route.reason ? ` · ${m.route.reason}` : ""}
-              </div>
-            )}
             {m.role === "assistant" && !!m.steps?.length && (
               <div className="steps">
                 {m.steps.map((s, j) => (
@@ -332,7 +324,6 @@ export default function ChatPanel({
             agent 模式{isLocal ? "" : "（远程受限）"}
           </label>
           <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
-            <option value="auto">自动选型</option>
             <option value="">本地模型</option>
             {providers.filter((p) => p.has_key).map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>

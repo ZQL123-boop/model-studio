@@ -120,7 +120,7 @@ GOALS = ["把整个仓库迁移完", "三个月内找到大模型应用开发的
 WRITE_TARGETS = ["~/Projects/sandbox/test.md", "~/Desktop/笔记.txt", "~/Projects/sandbox/out.json",
                  "~/Desktop/总结.md", "data/note.md", "~/Projects/sandbox/tmp.txt",
                  "~/Desktop/todo.md", "~/Projects/model-studio/data/draft.md"]
-EDIT_TARGETS = ["~/Projects/sandbox/fib.py", "app/router.py", "app/tools.py",
+EDIT_TARGETS = ["~/Projects/sandbox/fib.py", "app/guard.py", "app/tools.py",
                 "static/app.html", "~/Projects/sandbox/demo.md", "training/eval_router.py",
                 "app/agent.py", "~/Desktop/snippet.py"]
 

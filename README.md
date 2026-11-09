@@ -103,7 +103,7 @@ web/
 │   ├── style.css            深色主题
 │   └── components/
 │       ├── ModelList.tsx    模型列表 + 启动/停止 + 一键清理内存
-│       ├── ChatPanel.tsx    流式对话 + agent 工具步骤 + 自动选型标签
+│       ├── ChatPanel.tsx    流式对话 + agent 工具步骤
 │       ├── StatusPanel.tsx  内存 / RSS / 端口
 │       └── LogView.tsx      模型日志轮询
 ```
@@ -928,7 +928,7 @@ App.tsx                布局、状态轮询、门禁守卫
 api.ts                 fetch / SSE 封装
 components/
   ModelList.tsx        模型列表 + 启停 + 清理内存
-  ChatPanel.tsx        流式对话 + 工具步骤 + 自动选型
+  ChatPanel.tsx        流式对话 + 工具步骤
   RagPanel.tsx         知识库在线提问
   ReplayPane.tsx       129 题回放（RAGAS 分数）
   MemoryPanel.tsx      长期记忆 + 历史
@@ -1078,7 +1078,7 @@ generation thread 死后 **HTTP 服务还活着**（`/v1/models` 200、TCP 通�
 
 ### 普通聊天也能查实时数据（只读轻工具）
 
-**现象**：普通聊天问「中山天气怎么样」，自动选型选了本地 30B，模型背台词
+**现象**：普通聊天问「中山天气怎么样」，默认走本地 30B，模型背台词
 「我无法直接获取实时天气数据」。原因：`get_weather` 只在 agent 模式可用，
 `/api/chat/stream` 的 system 是 `with_tools=False`，模型手无寸铁。
 

@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import agent, gate, gateway, guard, memclean, memory, models, persona, providers, rag, router, scheduler, sysinfo, tokens, tools
+from . import agent, gate, gateway, guard, memclean, memory, models, persona, providers, rag, scheduler, sysinfo, tokens, tools
 from .gateway import ensure_local_ready
 from .runner import LOG_DIR, runner
 
@@ -265,36 +265,16 @@ class Target(BaseModel):
     model: str
     label: str
     remote: bool
-    provider: str = ""      # 实际用的 provider id（""=本地），自动模式下要回传给前端
-    reason: str = ""        # 自动选择的理由（人类可读）
+    provider: str = ""      # 实际用的 provider id（""=本地）
 
 
-def _auto_pick(messages: list[dict]) -> tuple[str, str]:
-    """自动模式：按问题内容挑模型。规则在 app/router.py，可解释。"""
-    last = ""
-    for m in reversed(messages or []):
-        if m.get("role") == "user":
-            last = str(m.get("content") or "")
-            break
-    provs = {p.id: p for p in providers.load_providers()}
-    return router.pick(
-        last,
-        local_ready=runner.status().get("state") == "ready",
-        has_chat_api=bool(provs.get("api__deepseek") and provs["api__deepseek"].has_key),
-        has_reason_api=bool(provs.get("api__deepseek_r1") and provs["api__deepseek_r1"].has_key),
-    )
+async def resolve_target(provider_id: str | None) -> Target:
+    """把 provider 标识翻译成「往哪发请求」。不传 / 传空 = 本地模型。
 
-
-async def resolve_target(provider_id: str | None,
-                         messages: list[dict] | None = None) -> Target:
-    """把 provider 标识翻译成「往哪发请求」。
-
-    provider_id 传 "auto" 时按问题内容自动选（见 app/router.py）。
+    自动选型已整体移除。老客户端若仍传 "auto"，按本地模型处理，不报错。
     """
-    reason = ""
     if provider_id == "auto":
-        provider_id, reason = _auto_pick(messages or [])
-
+        provider_id = ""
     if provider_id and provider_id.startswith("api__"):
         p = providers.find(provider_id)
         if not p:
@@ -306,7 +286,7 @@ async def resolve_target(provider_id: str | None,
         url = base + "/chat/completions" if base.endswith("/v1") else base + "/v1/chat/completions"
         return Target(url=url, headers=providers.auth_headers(p),
                       model=p.model, label=p.name, remote=True,
-                      provider=p.id, reason=reason)
+                      provider=p.id)
 
     st = runner.status()
     if st["state"] != "ready":
@@ -319,7 +299,7 @@ async def resolve_target(provider_id: str | None,
     return Target(url=f"http://127.0.0.1:{st['port']}/v1/chat/completions",
                   headers={"Content-Type": "application/json"},
                   model="default_model", label=st["model"] or "local", remote=False,
-                  provider="", reason=reason)
+                  provider="")
 
 
 # ------------------------------------------------------------------ 对话
@@ -638,7 +618,7 @@ async def chat(req: ChatReq, request: Request):
     """非流式聊天。**和流式一样挂联网工具**——之前这条路径完全没工具，
     任何走 /api/chat 的客户端问天气/新闻，模型只会背「我无法联网」。
     """
-    t = await resolve_target(req.provider, req.messages)
+    t = await resolve_target(req.provider)
     t0 = time.time()
     _qlast = next((m.get("content") or "" for m in reversed(req.messages or [])
                    if m.get("role") == "user"), "")
@@ -714,7 +694,7 @@ async def chat(req: ChatReq, request: Request):
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatReq, request: Request):
-    t = await resolve_target(req.provider, req.messages)
+    t = await resolve_target(req.provider)
 
     # 问题取最后一条 user；答案在流式过程中累积，结束才落盘
     _q = ""
@@ -745,11 +725,6 @@ async def chat_stream(req: ChatReq, request: Request):
                  "chunk_per_s": 0, "completion_tokens": 0,
                  "provider": t.label, "remote": t.remote}, ensure_ascii=False) + "\n\n"
             return
-        if req.provider == "auto":
-            yield "data: " + json.dumps(
-                {"route": {"provider": t.provider, "label": t.label,
-                           "reason": t.reason, "remote": t.remote}},
-                ensure_ascii=False) + "\n\n"
         n = 0
         usage: dict = {}
         try:
@@ -1041,7 +1016,7 @@ async def agent_stream(req: ChatReq, request: Request):
 
     远程访客（公网/局域网别的设备）只给只读工具子集，见 REMOTE_READONLY_TOOLS。
     """
-    t = await resolve_target(req.provider, req.messages)
+    t = await resolve_target(req.provider)
 
     async def sse(obj: dict) -> str:
         return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
@@ -1058,12 +1033,6 @@ async def agent_stream(req: ChatReq, request: Request):
     # 开局就把 id 推给前端，前端拿它来取消
     async def gen():
         yield "data: " + json.dumps({"id": req_id}, ensure_ascii=False) + "\n\n"
-        # 自动模式：把"选了谁、为什么"先告诉前端，用户能看懂也能手动覆盖
-        if req.provider == "auto":
-            yield "data: " + json.dumps(
-                {"route": {"provider": t.provider, "label": t.label,
-                           "reason": t.reason, "remote": t.remote}},
-                ensure_ascii=False) + "\n\n"
         # 每个任务独立计数：空回复重试 / 上下文压缩 / 模型重启
         globals()["_empty_retry"] = 0
         globals()["_shrink_n"] = 0

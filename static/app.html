@@ -219,12 +219,6 @@
   .strow b{color:var(--accent);font-weight:600}
   .strow .ar{color:#7d8590;margin-left:4px}
   .strow .pv{color:#6e7681;margin-top:2px;white-space:pre-wrap;word-break:break-word}
-  /* 自动选型提示：让用户知道"这句是谁答的、为什么" */
-  .routechip{display:inline-flex;align-items:center;gap:5px;margin-bottom:6px;
-    font-size:10px;color:var(--dim);background:var(--panel2);
-    border:1px solid var(--border);border-radius:999px;padding:2px 8px}
-  .routechip b{color:var(--accent);font-weight:600}
-
   /* ---------- 回放 ---------- */
   .replay-wrap{display:flex;flex:1;min-height:0;min-width:0}
   .replay-list{width:290px;flex:none;border-right:1px solid var(--border);
@@ -482,8 +476,7 @@
         </label>
         <select id="agent-provider" style="font-size:11px;padding:2px 6px;background:var(--bg);
           border:1px solid var(--border);border-radius:6px;color:var(--text)">
-          <option value="auto" selected>自动（按问题挑）</option>
-          <option value="">本地模型</option>
+          <option value="" selected>本地模型</option>
           <option value="api__deepseek">DeepSeek Chat（快）</option>
           <option value="api__deepseek_r1">DeepSeek Reasoner（强但慢）</option>
         </select>
@@ -1329,15 +1322,6 @@ async function send() {
         if (!p.startsWith("data: ")) continue;
         const d = JSON.parse(p.slice(6));
         if (d.error) throw new Error(d.error);
-        // 自动选型：先把"这句归谁答"显示出来
-        if (d.route) {
-          const r = d.route;
-          const chip = document.createElement("div");
-          chip.className = "routechip";
-          chip.innerHTML = `🧭 自动选型：<b>${_esc(r.label)}</b>`
-            + (r.reason ? ` · ${_esc(r.reason)}` : "");
-          body.parentNode.insertBefore(chip, body);
-        }
         // 推理模型的思考过程：mlx 给累积全文，云端给增量，靠前缀判断
         if (d.r) {
           const prev = reasonPre.textContent;
@@ -2114,7 +2098,6 @@ async function sendAgent(text) {
   if (body) body.classList.add("cursor");
   const steps = [];
   let plan = [], cursor = 0;
-  let route = null;                 // 自动选型结果
   let answer = "";
   let err = "";
 
@@ -2144,9 +2127,6 @@ async function sendAgent(text) {
         if (f.id) {
           AGENT_RUNNING = f.id;
         }
-        if (f.route) {
-          route = f.route;
-        }
         if (f.t) {
           // 流式文字：边收边渲染，让用户看到模型在写
           answer += f.t;
@@ -2154,10 +2134,7 @@ async function sendAgent(text) {
             const box = body.querySelector(".live");
             if (box) box.textContent = answer;
             else {
-              const _rc = route
-                ? `<div class="routechip">🧭 自动选型：<b>${_esc(route.label || "")}</b>`
-                  + (route.reason ? ` · ${_esc(route.reason)}` : "") + `</div>` : "";
-              body.innerHTML = _rc + `<div style="font-size:11px;color:var(--dim)">
+              body.innerHTML = `<div style="font-size:11px;color:var(--dim)">
                 🔧 已执行 ${steps.length} 步</div>
                 <div class="live" style="white-space:pre-wrap;margin-top:6px"></div>`;
               body.querySelector(".live").textContent = answer;
@@ -2217,12 +2194,8 @@ async function sendAgent(text) {
             + `<div class="pv">${_esc((s.preview || "").slice(0, 150))}</div></div>`;
         }).join("") + `</details>`
     : "";
-  const routeHtml = route
-    ? `<div class="routechip">🧭 自动选型：<b>${_esc(route.label || "")}</b>`
-      + (route.reason ? ` · ${_esc(route.reason)}` : "") + `</div>`
-    : "";
   if (body) body.innerHTML =
-    routeHtml + planHtml + stepHtml
+    planHtml + stepHtml
     + `<div style="white-space:pre-wrap">${_renderAnswer(answer)}</div>`;
 
   // agent 答案也要进历史并持久化，否则刷新后只剩用户提问、答案丢了
