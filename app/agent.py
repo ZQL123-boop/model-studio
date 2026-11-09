@@ -41,6 +41,7 @@ class AgentState:
     recent: list[str] = field(default_factory=list)   # 最近操作的签名
     fails: int = 0                                    # 连续失败次数
     stuck_hits: int = 0                               # 同一调用重复被警告了几次
+    plan_repeats: int = 0                             # 计划原地踏步被警告了几次
     cache: dict = field(default_factory=dict)         # (tool,args) -> 结果，任务内复用
 
     def system_block(self) -> str:
@@ -168,6 +169,20 @@ def record(state: AgentState, name: str, args: dict, result: str) -> None:
         state.cache[key] = result
 
 
+def _plan_step_text(state: AgentState) -> str:
+    """安全取当前步骤文本。
+
+    cursor 允许等于 len(plan)（表示计划全部做完），此时 plan[cursor] 越界。
+    实测 write_plan 连调 6 次、cursor 涨到 len 之后就崩在这，
+    前端只给一行 IndexError，整轮白跑 124 秒。
+    """
+    if not state.plan:
+        return "（空）"
+    if 0 <= state.cursor < len(state.plan):
+        return state.plan[state.cursor]
+    return "（计划已全部完成）"
+
+
 def execute(state: AgentState, name: str, args: dict, tools_mod) -> tuple[str, bool]:
     """执行一次工具调用，返回 (结果文本, 是否卡住)。"""
     if name == "write_plan":
@@ -182,14 +197,25 @@ def execute(state: AgentState, name: str, args: dict, tools_mod) -> tuple[str, b
         # 只接受"进度前进"。模型每轮重新生成的步骤文字常有细微差别，
         # 用文本相等判断拦不住——实测同一个任务被调了 6 次 write_plan。
         # 按 cursor 判断：没前进就是重复。
+        # 注意：write_plan 在 state.push() 之前 return，绕过了重复检测，
+        # 所以这里单独计数，到 3 次就收口，别让它把轮次全耗在列计划上。
         if state.plan and new_cursor <= state.cursor:
+            state.plan_repeats += 1
+            if state.cursor >= len(state.plan):
+                return ("[计划已全部完成] 不要再调 write_plan。"
+                        "现在就用已有结果给出最终回答。"), True
+            if state.plan_repeats >= 3:
+                return ("[停止调计划] 计划已经写好了，再列一遍不会让任务前进。"
+                        "现在就执行下一步，或者直接给最终回答。"), True
             return ("[计划已存在，不要重复列计划] 直接做当前这一步："
-                    f"第 {state.cursor + 1} 步「{state.plan[state.cursor]}」。"
+                    f"第 {state.cursor + 1} 步「{_plan_step_text(state)}」。"
                     "做完再调我、把 current 加一。"), False
         state.plan = new_plan
         state.cursor = new_cursor
-        cur = state.plan[state.cursor] if state.plan else "（空）"
-        return f"[计划已更新] 共 {len(state.plan)} 步，当前第 {state.cursor + 1} 步：{cur}", False
+        state.plan_repeats = 0
+        _n = min(state.cursor + 1, len(state.plan))
+        return (f"[计划已更新] 共 {len(state.plan)} 步，"
+                f"当前第 {_n} 步：{_plan_step_text(state)}"), False
 
     stuck = state.push(name, args)
 
