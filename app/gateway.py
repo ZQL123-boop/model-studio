@@ -72,7 +72,24 @@ def _local_route() -> Route:
                  model="default_model", label=st["model"] or "local", remote=False)
 
 
-def resolve(model: str) -> Route:
+_LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def is_local_request(request: Request) -> bool:
+    """与 main._is_local_request 同一判定：真本机且无 X-Forwarded-For。
+
+    gateway 不能 import main（循环导入），所以这里写一份，两处保持一致。
+    """
+    host = request.client.host if request.client else ""
+    forwarded = (request.headers.get("x-forwarded-for") or "").strip()
+    return host in _LOCAL_HOSTS and not forwarded
+
+
+def resolve(model: str, *, visitor: bool = False) -> Route:
+    # 模型选择只对本机开放：公网带 token 在 /v1 里点名 deepseek-chat 也不行，
+    # 一律落到本地模型。
+    if visitor and not _is_local(model):
+        return _local_route()
     if _is_local(model):
         return _local_route()
 
@@ -222,14 +239,19 @@ async def _prepare(request: Request) -> tuple[Route, dict]:
         raise HTTPException(400, "请求体不是合法 JSON")
 
     model = body.get("model") or "local"
-    if _is_local(model) and body.get("auto_start", True) is not False:
-        # 客户端点名了具体模型就切过去；只说 local 就用当前/默认的。
+    # 远程访客点名的云端模型会被 resolve 降级到本地，这里一并算作本地，
+    # 保证本地没起时也能自动拉起，而不是甩一个 503。
+    route = resolve(model, visitor=not is_local_request(request))
+    if not route.remote and body.get("auto_start", True) is not False:
+        # 客户端点名了具体本地模型就切过去；只说 local / 被降级的用当前默认。
         # 不这么做的话，dsh 里选 R1-14B 实际会跑 30B（19.4GB），
         # Agent 的长 prompt 一压就 generation thread died。
-        prefer = None if model.strip().lower() in LOCAL_ALIASES else model.strip()
+        _named_local = (not is_local_request(request)
+                        and not _is_local(model))
+        prefer = (None if (_named_local or model.strip().lower() in LOCAL_ALIASES)
+                  else model.strip())
         await ensure_local_ready(prefer=prefer)
 
-    route = resolve(model)
     body["model"] = route.model
     body.pop("auto_start", None)
     return route, body

@@ -323,12 +323,21 @@ export default function ChatPanel({
             />
             agent 模式{isLocal ? "" : "（远程受限）"}
           </label>
-          <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
-            <option value="">本地模型</option>
-            {providers.filter((p) => p.has_key).map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          {/* 模型选择只对本机开放：公网访客固定用本地模型。
+              后端 resolve_target 也会把 api__* 降级，这里只是不让它看起来可选。 */}
+          {isLocal ? (
+            <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
+              <option value="">本地模型</option>
+              {providers.filter((p) => p.has_key).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="provider-lock"
+                  title="公网访问固定使用本地模型，模型选择只在本机开放">
+              本地模型（公网不可切换）
+            </span>
+          )}
         </div>
       </div>
     </>

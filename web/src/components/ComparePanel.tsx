@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { streamSSE } from "../api";
+import { isLocalHost } from "../auth";
 import type { GenSettings, Provider } from "../types";
 
 interface Side {
@@ -36,6 +37,18 @@ export default function ComparePanel({
   const [right, setRight] = useState<Side>(EMPTY);
 
   const busy = left.running || right.running;
+
+  // 模型选择只对本机开放：公网访客不能在这挑云端模型（会花主人的钱）。
+  // 放在所有 hooks 之后，避免违反 hooks 调用顺序。
+  if (!isLocalHost()) {
+    return (
+      <div className="empty">
+        模型对比只在本机开放。
+        <br />
+        公网访问固定使用本地模型，不能切换或对比云端 API。
+      </div>
+    );
+  }
 
   async function consume(
     provider: string,

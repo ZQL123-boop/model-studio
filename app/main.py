@@ -269,12 +269,21 @@ class Target(BaseModel):
     provider: str = ""      # 实际用的 provider id（""=本地）
 
 
-async def resolve_target(provider_id: str | None) -> Target:
+async def resolve_target(provider_id: str | None, *,
+                         visitor: bool = False) -> Target:
     """把 provider 标识翻译成「往哪发请求」。不传 / 传空 = 本地模型。
 
     自动选型已整体移除。老客户端若仍传 "auto"，按本地模型处理，不报错。
+
+    模型选择只对本机开放：远程访客即便直接构造 `api__xxx`，也一律降级到
+    本地模型——前端藏下拉框不算数，公网 POST 一下就能绕过（教训同工具白名单）。
     """
     if provider_id == "auto":
+        provider_id = ""
+    if visitor and provider_id and provider_id.startswith("api__"):
+        import sys as _s
+        print(f"[chat] 远程访客请求云端 {provider_id}，已降级为本地模型",
+              file=_s.stderr, flush=True)
         provider_id = ""
     if provider_id and provider_id.startswith("api__"):
         p = providers.find(provider_id)
@@ -665,7 +674,7 @@ async def chat(req: ChatReq, request: Request):
     """非流式聊天。**和流式一样挂联网工具**——之前这条路径完全没工具，
     任何走 /api/chat 的客户端问天气/新闻，模型只会背「我无法联网」。
     """
-    t = await resolve_target(req.provider)
+    t = await resolve_target(req.provider, visitor=not _is_local_request(request))
     t0 = time.time()
     _qlast = next((m.get("content") or "" for m in reversed(req.messages or [])
                    if m.get("role") == "user"), "")
@@ -741,7 +750,7 @@ async def chat(req: ChatReq, request: Request):
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatReq, request: Request):
-    t = await resolve_target(req.provider)
+    t = await resolve_target(req.provider, visitor=not _is_local_request(request))
 
     # 问题取最后一条 user；答案在流式过程中累积，结束才落盘
     _q = ""
@@ -1075,7 +1084,7 @@ async def agent_stream(req: ChatReq, request: Request):
 
     远程访客（公网/局域网别的设备）只给只读工具子集，见 REMOTE_READONLY_TOOLS。
     """
-    t = await resolve_target(req.provider)
+    t = await resolve_target(req.provider, visitor=not _is_local_request(request))
 
     async def sse(obj: dict) -> str:
         return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
