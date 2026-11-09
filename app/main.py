@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -367,8 +368,54 @@ _CHAT_TOOLS_NOTE = """
 1. 用户问天气、汇率、新闻、行情时，先调工具拿真实数据再回答；查不到就直说，绝不编数字。
 2. 最多 4 轮工具调用，拿到能回答的信息就**立刻收尾作答**，别一轮接一轮地搜。
 3. 文件读写、执行命令、删改系统**确实做不到**，这部分照实说。
+4. **绝对不要说「已创建 / 已保存 / 已写入 / 文件路径为」**——你没有写文件的工具，
+   说这话就是撒谎。用户让你写代码，就把完整代码贴在回答里，末尾说一句
+   「保存为 xxx.c 即可运行」。
 """
 
+
+
+# 普通聊天没有写文件工具（CHAT_TOOL_NAMES 全是只读），但 30B 会幻觉。
+# 实测 2026-11-09：用户「用c写一个快速排序」→ 回答「已创建快速排序程序，
+# 文件路径为 ~/Projects/sort/quick_sort.c」，而那个目录根本不存在。
+_FAKE_FILE_CLAIM = re.compile(
+    r"(已创建|已生成|已保存|已写入|文件路径为?|保存在|写入到)[\s\S]{0,80}?"
+    r"(\.(?:c|h|cpp|py|js|ts|tsx|jsx|md|txt|json|html|css|sh|java|go|rs|sql|yaml|yml)\b"
+    r"|~?/[\w./-]+)",
+    re.I,
+)
+
+_FAKE_CLAIM_FIX = (
+    "（系统更正）你刚才说「已创建/已保存」了文件，但普通聊天模式下你**没有任何写文件"
+    "工具**，那个文件并不存在。请重写这段回答：\n"
+    "1. 不要出现「已创建」「已保存到」「文件路径为」这类话；\n"
+    "2. 直接把完整代码贴在回答里，末尾说一句「保存为 xxx.c 即可运行」；\n"
+    "3. 其余技术内容保持不变，不要道歉、不要解释这次更正。"
+)
+
+
+async def _rewrite_no_file_claim(text: str, req: "ChatReq", t: "Target",
+                                 *, include_notes: bool, visitor: bool) -> str:
+    """模型幻觉「写好了文件」时重写一次；失败则前置一句说明，至少不误导。"""
+    try:
+        body = _payload(req, t, False, include_notes=include_notes,
+                        visitor=visitor, with_tools=False)
+        body["messages"] = list(body.get("messages") or []) + [
+            {"role": "assistant", "content": text[-6000:]},
+            {"role": "user", "content": _FAKE_CLAIM_FIX},
+        ]
+        async with httpx.AsyncClient(timeout=90) as c:
+            r = await c.post(t.url, json=body, headers=t.headers)
+        if r.status_code < 400:
+            j = r.json()
+            new = ((j.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+            if new.strip():
+                return new.strip()
+    except Exception as e:                                # noqa: BLE001
+        import sys as _s
+        print(f"[chat] 幻觉修正失败：{type(e).__name__}: {e}", file=_s.stderr, flush=True)
+    return ("⚠️ 说明：普通聊天模式下我没有写文件的能力，上面提到的文件并不存在。\n\n"
+            + text)
 
 
 def _is_capability_q(text: str) -> bool:
@@ -884,10 +931,20 @@ async def chat_stream(req: ChatReq, request: Request):
                         continue
                     break
             total = time.time() - t0
+            # 普通聊天没有写文件工具，但 30B 会幻觉「已创建 xxx.c」。
+            # 检测到就重写一次，别让用户真以为磁盘上多了个文件。
+            # 注意用独立变量 _final：在 gen() 里给 _acc 赋值会把它变成局部变量，
+            # 前面所有读取都会 UnboundLocalError（踩过一次，整个流式接口 500）。
+            _final = "".join(_acc)
+            if _final and _FAKE_FILE_CLAIM.search(_final):
+                _final = await _rewrite_no_file_claim(
+                    _final, req, t,
+                    include_notes=_is_local_request(request),
+                    visitor=not _is_local_request(request))
             # 落盘（失败不影响本次对话）
             try:
                 memory.record(
-                    _q, "".join(_acc),
+                    _q, _final,
                     model=t.label,
                     elapsed_s=total,
                     completion_tokens=usage.get("completion_tokens"),
@@ -898,13 +955,15 @@ async def chat_stream(req: ChatReq, request: Request):
                 print(f"[memory] 写入失败: {e}", file=sys.stderr, flush=True)
             # 模型偶尔一个字都不输出。静默返回空白，用户以为卡死了。
             # 这里明确报一句，前端能提示重试。
-            if not _acc:
+            if not _final:
                 yield "data: " + json.dumps(
                     {"error": "模型没有输出内容（可能被截断或空回复），请重发一次"},
                     ensure_ascii=False) + "\n\n"
                 return
+            # done 带 answer：前端用它覆盖累积的增量，修正式回答才能生效
             yield "data: " + json.dumps({
                 "done": True,
+                "answer": _final,
                 "ttft_s": round(first or 0, 2),
                 "elapsed_s": round(total, 2),
                 "chunks": n,
